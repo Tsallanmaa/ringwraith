@@ -18,7 +18,7 @@ from .. import art, artqueue, clock, dice, fileio, geo, ops, vault
 from .. import campaign as cp
 from .. import config as cfg
 from .hub import Hub
-from .views import current_scene, geo_view, sheet  # noqa: F401 (server and engine use them from here)
+from .views import _hero_xp, _portrait, current_scene, geo_view, sheet  # noqa: F401 (server and engine use them from here)
 
 SERVER = "rw"
 
@@ -46,6 +46,10 @@ def _fought_before(name: str) -> bool:
     except cp.CampaignError:
         return False
     return fm.get("type") == "adversary" and bool(fm.get("statblock_from") or fm.get("encountered"))
+
+
+def player_reads_oracles() -> bool:
+    return cp.load_settings()["play"]["oracle"] == "player"
 
 
 def build(hub: Hub, turn: dict | None = None):
@@ -111,12 +115,13 @@ def build(hub: Hub, turn: dict | None = None):
         same = turn.get("last_roll") == (a.get("who"), str(a.get("what", "")).lower())
         if chained and same and not await outcome_told():
             return _err("Not rolled: that is the roll just made, and an action is never re-rolled. Tell its "
-                        "outcome as story now: what happened, so the player lives through it.")
+                        "outcome as story now, in your reply text (your thinking is hidden from the player).")
         if not chained and not await outcome_told():
-            return _err("Not rolled. First tell the outcome of the previous roll or oracle as story: what "
-                        "happened, so the player lives through it. Then call request_roll again. Never "
-                        "re-roll an action that was already rolled. If this roll truly follows from the last "
-                        "with nothing to tell in between, pass chained: true.")
+            return _err("Not rolled. First tell the outcome of the previous roll or oracle as story in your "
+                        "reply text, which the player sees (your thinking is hidden: story told only there is "
+                        "lost). Then call request_roll again. Never re-roll an action that was already rolled. "
+                        "Pass chained: true only for a roll that follows mechanically from the last (Protection "
+                        "after a hit), never to skip telling a story.")
         kw = dict(favoured=bool(a.get("favoured")), ill=bool(a.get("ill_favoured")),
                   bonus=int(a.get("bonus") or 0), penalty=int(a.get("penalty") or 0),
                   inspired=bool(a.get("inspired")), weary=bool(a.get("weary")),
@@ -192,11 +197,11 @@ def build(hub: Hub, turn: dict | None = None):
           "talk on the road, a view, a memory), rest, or other; title (a few words: 'Chance meeting: a lone "
           "hunter'), text (one or two sentences of what happened, as the player saw it), at (the place, if any), "
           "who (the hero, the Band, an Ally), outcome, hexes_done (hexes covered so far, when it changes), "
-          "fatigue_hero and fatigue_band (fatigue this moment cost). fatigue_hero is added to the hero sheet by "
-          "this tool: don't also note_set it. action 'end' on arrival (status arrived) or when turning back "
-          "(status abandoned), with outcome. Never put land types (border, wild, dark) here: the player sees all of it.",
+          "fatigue_hero (added to the sheet by this tool) and fatigue_band. action 'end' on arrival (status "
+          "arrived) or turning back (abandoned), with outcome. 'show': where it stands. The player sees all of it: "
+          "never land types.",
           {"type": "object",
-           "properties": {"action": {"type": "string", "enum": ["start", "log", "end"]},
+           "properties": {"action": {"type": "string", "enum": ["start", "log", "show", "end"]},
                           "from": {"type": "string"}, "to": {"type": "string"},
                           "via": {"type": "array", "items": {"type": "string"}}, "title": {"type": "string"},
                           "season": {"type": "string"}, "mode": {"type": "string"},
@@ -217,6 +222,10 @@ def build(hub: Hub, turn: dict | None = None):
                     plan = None
                 state = jr.start(a.get("from", ""), a.get("to", ""), a.get("title") or "", a.get("season") or "",
                                  a.get("mode") or "", list(a.get("via") or []), plan=plan)
+            elif a["action"] == "show":
+                state = jr.load()
+                if not state:
+                    return _text("no journey in progress")
             elif a["action"] == "log":
                 state, e = jr.log(a)
                 await hub.emit({"t": "journey_mark", "id": e["id"], "kind": e["kind"], "day": e["day"],
@@ -239,18 +248,18 @@ def build(hub: Hub, turn: dict | None = None):
     @tool("fight",
           "Track a fight on the table's Fight panel. action 'start' when combat or a Band battle begins: kind "
           "(combat|battle), title, foes [{name, note (its adversary note, for the portrait), count, endurance, "
-          "hate or resolve, might, parry, armour, features, weapons, engaged, known, abilities}], stance (the "
-          "hero's), and for a battle: battle {resistance, might, objective, objective_resistance, advantages, "
-          "complications, focus, band_stance, clash}. action 'update' after each round or clash with only what "
+          "hate or resolve, might, parry, armour, features, weapons (names only), engaged, known, abilities}], "
+          "stance (the hero's), and for a battle: battle {resistance, resistance_max (the Resistance it started "
+          "with, when the panel opens part-way through), might, objective, objective_resistance, advantages and "
+          "complications [{name, effect ('+1d', '−1d'), persistent, text (one line of story for the player: what it "
+          "is and why it helps or hinders)}], focus, band_stance, clash}. action 'update' after each round or clash with only what "
           "changed (foes matched by name: endurance, hate, wounded, weary, state fighting|fled|surrendered|slain, "
           "count, down, engaged; round, stance; battle fields; log: one line of what happened). action 'end' "
-          "with outcome. The player sees each foe's Endurance and Hate as a bar and a word, never as numbers "
-          "(describe them in the story). Give known [parry, armour, might] once the hero would know them (after "
-          "fighting a while, a telling roll, or having fought its kind before; 'all' for every one), and abilities "
-          "[{name, text}] when a foe first uses a Fell Ability. You get the full state back each time: keep the "
-          "numbers here, not in the chat.",
+          "with outcome. known [parry, armour, might] or 'all' once the hero would know them; abilities [{name, "
+          "text}] when a foe first uses a Fell Ability. Returns the full state; 'show' gives it in a new "
+          "conversation.",
           {"type": "object",
-           "properties": {"action": {"type": "string", "enum": ["start", "update", "end"]},
+           "properties": {"action": {"type": "string", "enum": ["start", "update", "show", "end"]},
                           "kind": {"type": "string", "enum": ["combat", "battle"]}, "title": {"type": "string"},
                           "foes": {"type": "array", "items": {"type": "object"}}, "battle": {"type": "object"},
                           "round": {"type": "integer"}, "stance": {"type": "string"}, "log": {"type": "string"},
@@ -266,6 +275,10 @@ def build(hub: Hub, turn: dict | None = None):
                         f["known"] = "all"
                 state = fg.start(a.get("kind") or "combat", a.get("title") or "", foes, a.get("battle"),
                                  a.get("stance"))
+            elif a["action"] == "show":
+                state = fg.load()
+                if not state:
+                    return _text("no fight in progress")
             elif a["action"] == "update":
                 state = fg.update(a)
             else:
@@ -278,6 +291,82 @@ def build(hub: Hub, turn: dict | None = None):
             return _err(f"fight: {e}")
         await hub.emit({"t": "fight", "fight": fg.public_view(state, _portrait)})
         return _text(fg.summary(state))
+
+    @tool("council",
+          "Track a council on the table's Council panel. action 'start' when the council begins, before the "
+          "introduction roll: title, who [names, or {name, note} for portraits], request (what the hero asks, as "
+          "the hero would put it), resistance (the procedure's level), attitude (one or two words: how they "
+          "receive the hero). action 'update' with only what changed: rounds (the time limit the introduction "
+          "set), used (exchanges spent), add (successes this exchange won) or successes (the running total), "
+          "attitude, and log: one line of what was said or happened. action 'end' with outcome. Returns the full "
+          "state; 'show' gives it in a new conversation.",
+          {"type": "object",
+           "properties": {"action": {"type": "string", "enum": ["start", "update", "show", "end"]},
+                          "title": {"type": "string"}, "who": {"type": "array", "items": {}},
+                          "request": {"type": "string"}, "resistance": {"type": "integer"},
+                          "attitude": {"type": "string"}, "rounds": {"type": "integer"},
+                          "used": {"type": "integer"}, "add": {"type": "integer"},
+                          "successes": {"type": "integer"}, "log": {"type": "string"},
+                          "outcome": {"type": "string"}},
+           "required": ["action"]})
+    async def council(a: dict) -> dict:
+        from . import council as cn
+        try:
+            if a["action"] == "start":
+                state = cn.start(a.get("title") or "", a.get("who"), a.get("request") or "", a.get("resistance"),
+                                 a.get("attitude"))
+            elif a["action"] == "show":
+                state = cn.load()
+                if not state:
+                    return _text(cn.summary(None))
+            elif a["action"] == "update":
+                state = cn.update(a)
+            else:
+                done = cn.end(a.get("outcome") or "")
+                await hub.emit({"t": "council", "council": None})
+                await hub.emit({"t": "council_end", "title": done["title"], "outcome": done["outcome"]})
+                return _text(f"council over: {done['title']}. {done['outcome']}")
+        except (cn.CouncilError, ValueError, TypeError) as e:
+            return _err(f"council: {e}")
+        await hub.emit({"t": "council", "council": cn.public_view(state, _portrait)})
+        return _text(cn.summary(state))
+
+    @tool("fellowship",
+          "Track a Fellowship Phase on the table's Fellowship panel; it keeps the phase's progress across sessions. "
+          "action 'start' once the player has chosen the duration: duration (hurried, brief, extended or yule), "
+          "place (the Safe Haven), undertakings (how many the duration allows). action 'update' with only what "
+          "changed: done (a step or list of steps finished: recovery, updates, interruption, undertakings, "
+          "close), undo (steps to reopen), chosen (one undertaking taken, as a short name), undertakings (the "
+          "new number allowed, e.g. after an interruption costs one), interruption (one line of what befell the "
+          "Band), log (one line). 'show': what is done and what comes next. action 'end' with outcome, after the "
+          "close step. Experience is spent on the hero note's xp (note_set).",
+          {"type": "object",
+           "properties": {"action": {"type": "string", "enum": ["start", "update", "show", "end"]},
+                          "duration": {"type": "string"}, "place": {"type": "string"},
+                          "undertakings": {"type": "integer"}, "done": {}, "undo": {},
+                          "chosen": {"type": "string"}, "interruption": {"type": "string"},
+                          "log": {"type": "string"}, "outcome": {"type": "string"}},
+           "required": ["action"]})
+    async def fellowship(a: dict) -> dict:
+        from . import fellowship as fs
+        try:
+            if a["action"] == "start":
+                state = fs.start(a.get("duration") or "", a.get("place") or "", a.get("undertakings"))
+            elif a["action"] == "update":
+                state = fs.update(a)
+            elif a["action"] == "show":
+                state = fs.load()
+                if not state:
+                    return _text(fs.summary(None))
+            else:
+                done = fs.end(a.get("outcome") or "")
+                await hub.emit({"t": "fellowship", "fellowship": None})
+                await hub.emit({"t": "fellowship_end", **done})
+                return _text(f"fellowship phase over. {done['outcome']}")
+        except (fs.FellowshipError, ValueError, TypeError) as e:
+            return _err(f"fellowship: {e}")
+        await hub.emit({"t": "fellowship", "fellowship": fs.public_view(state, _hero_xp())})
+        return _text(fs.summary(state))
 
     @tool("roll_adversary",
           "Roll an adversary's test (attack etc.) with the Shadow's reading of the Feat die. Shown in the tray.",
@@ -320,7 +409,7 @@ def build(hub: Hub, turn: dict | None = None):
             await hub.emit({"t": "oracle", "kind": "telling", "question": a["question"], "chance": chance,
                             "feat": _face(face), "answer": str(answer)})
         turn["story_since_roll"] = False
-        return _text(text)
+        return _text(text + _reading_note(a.get("show_player", True)))
 
     @tool("roll_table",
           "Roll on a lore table by id (e.g. lore-strider with column Action/Aspect/Focus, strider-journey-events).",
@@ -339,7 +428,50 @@ def build(hub: Hub, turn: dict | None = None):
         if a.get("show_player", True):
             await hub.emit({"t": "oracle", "kind": "table", "question": a.get("label") or r.title, "answer": text})
         turn["story_since_roll"] = False
-        return _text(text)
+        return _text(text + _reading_note(a.get("show_player", True)))
+
+    def _reading_note(shown: bool) -> str:
+        if shown and player_reads_oracles():
+            return ("\n\nThe player reads the oracles in this campaign: call oracle_reading with the question, this "
+                    "result and your suggested reading before telling anything that follows from it.")
+        return ""
+
+    @tool("oracle_reading",
+          "Only when the player reads the oracles (settings: play.oracle player): offer your reading of an oracle "
+          "result just rolled in the open. Waits for the player, who accepts it or gives their own. Returns the "
+          "reading to play by.",
+          {"type": "object",
+           "properties": {"question": {"type": "string", "description": "the question, as asked"},
+                          "result": {"type": "string", "description": "what the oracle gave, e.g. 'Yes, with "
+                                                                      "{eye}' or 'Action: Seek, Focus: Ruin'"},
+                          "suggestion": {"type": "string", "description": "your reading in one or two "
+                                                                          "sentences, in the story's terms"}},
+           "required": ["question", "result", "suggestion"]})
+    async def oracle_reading(a: dict) -> dict:
+        if not player_reads_oracles():
+            return _text("You read the oracles in this campaign: go on and tell what came of it.")
+        ans = await hub.ask("reading", {"t": "reading_request", "question": a["question"], "result": a["result"],
+                                        "suggestion": a["suggestion"]})
+        if ans.get("action") == "cancel":
+            await hub.emit({"t": "reading_cancelled", "id": ans.get("_id")})
+            return _text("The player stopped before giving a reading. Don't play the oracle's answer; wait for "
+                         "their word.")
+        if ans.get("action") == "talk":         # a question about the oracle before reading it
+            await hub.emit({"t": "reading_cancelled", "id": ans.get("_id")})
+            turn["owe_reply"] = ans.get("text", "") or "…"
+            return _text(f"The player hasn't read the oracle yet; they asked: {ans.get('text', '')!r}. Answer them "
+                         "in your reply text (your thinking is hidden), then call oracle_reading again with your "
+                         "suggestion.")
+        own =ans.get("action") == "own" and str(ans.get("text", "")).strip()
+        reading = str(ans["text"]).strip() if own else a["suggestion"]
+        await hub.emit({"t": "reading_result", "id": ans.get("_id"), "question": a["question"], "text": reading,
+                        "own": bool(own)})
+        turn["story_since_roll"] = False
+        if own:
+            return _text(f"The player's reading: {reading!r}. It replaces yours entirely: play it as the truth of "
+                         "the world, and if it leaves something open, fill it in their spirit. Now tell what came of "
+                         "it as story.")
+        return _text("The player accepted your reading. Now tell what came of it as story.")
 
     @tool("get_tn", "Target Number for an Attribute score (hero) or Readiness (Band); knows about easy mode.",
           {"attribute": int})
@@ -361,6 +493,8 @@ def build(hub: Hub, turn: dict | None = None):
             return _err(str(e))
         if a["kind"] in ("hero", "ally"):
             await push_sheet()
+        if a["kind"] == "session":      # the chronicle tells a new session from one picked up after a break
+            await hub.emit({"t": "session_mark", "note": p.name})
         return _text(str(p))
 
     @tool("note_get", "Read a note's frontmatter (or one dotted key) by name or vault path.",
@@ -643,16 +777,24 @@ def build(hub: Hub, turn: dict | None = None):
                                           "description": "defaults to the World clock's time of day"},
                           "characters": {"type": "array", "items": {"type": "string"},
                                          "description": "up to 3 named characters clearly visible in the picture "
-                                                        "(note names); their portraits keep their faces consistent"}},
+                                                        "(note names); their portraits keep their faces consistent"},
+                          "look": {"type": "string",
+                                   "description": "one of the campaign's painting looks, if it has any (see "
+                                                  "'Painting looks' in your instructions); leave out for the house "
+                                                  "style"},
+},
            "required": ["title", "image", "mood"]})
     async def set_scene(a: dict) -> dict:
         s = cp.load_settings()
         job = None
         if s["art"]["enabled"]:
             when = a.get("time_of_day") or art.time_from_text(clock.state()[1].get("time"))
-            job = artqueue.enqueue("scene", a["image"], name=a["title"], priority=1, mood=a.get("mood"), time=when,
-                                   characters=a.get("characters") or [])
-        (cp.private_dir() / "table-scene.json").write_text(json.dumps({"title": a["title"]}), encoding="utf-8")
+            try:
+                job = artqueue.enqueue("scene", a["image"], name=a["title"], priority=1, mood=a.get("mood"),
+                                       time=when, characters=a.get("characters") or [], look=a.get("look"))
+            except art.ArtError as e:
+                return _err(f"{e}. Nothing was changed; call set_scene again.")
+        fileio.atomic_write(cp.private_dir() / "table-scene.json", json.dumps({"title": a["title"]}))
         await hub.emit({"t": "scene", "title": a["title"], "job": job["id"] if job else None})
         done = "scene set" + (", painting queued" if job else " (art is off)")
         if turn.get("told") or turn.get("pending_story"):
@@ -671,17 +813,44 @@ def build(hub: Hub, turn: dict | None = None):
                                    "enum": ["calm", "wonder", "tense", "danger", "battle", "dread", "sorrow"]},
                           "time_of_day": {"type": "string", "enum": ["dawn", "day", "dusk", "night"]},
                           "characters": {"type": "array", "items": {"type": "string"},
-                                         "description": "named characters in the picture whose portraits exist"}},
+                                         "description": "named characters in the picture whose portraits exist"},
+                          "look": {"type": "string",
+                                   "description": "one of the campaign's painting looks, if it has any (see "
+                                                  "'Painting looks' in your instructions); leave out for the house "
+                                                  "style"},
+},
            "required": ["preset", "subject"]})
     async def queue_art(a: dict) -> dict:
         if not cp.load_settings()["art"]["enabled"]:
             return _text("art is off in the campaign settings; nothing queued")
         try:
             job = artqueue.enqueue(a["preset"], a["subject"], note=a.get("note"), name=a.get("name"),
-                                   mood=a.get("mood"), time=a.get("time_of_day"), characters=a.get("characters") or [])
+                                   mood=a.get("mood"), time=a.get("time_of_day"), characters=a.get("characters") or [],
+                                   look=a.get("look"))
         except Exception as e:  # noqa: BLE001
             return _err(str(e))
         return _text(f"queued {job['id']}: {job['file']}")
+
+    @tool("sketch",
+          "Draw a small pencil sketch into the tale, where it is told, of something the hero hears of but doesn't "
+          "see now: a place, person, creature or thing described in a tale, a rumour, a letter, a memory or a "
+          "vision. Never for what is happening in front of the hero (set_scene paints that).",
+          {"type": "object",
+           "properties": {"subject": {"type": "string",
+                                      "description": "what to draw, plainly and physically: the thing first, then "
+                                                     "its setting; few or no figures"},
+                          "caption": {"type": "string", "description": "a few words under the sketch, e.g. "
+                                                                       "'The tower on Amon Sûl, as Bob told it'"}},
+           "required": ["subject", "caption"]})
+    async def sketch(a: dict) -> dict:
+        if not cp.load_settings()["art"]["enabled"]:
+            return _text("art is off in the campaign settings; no sketch")
+        try:
+            job = artqueue.enqueue("sketch", a["subject"], name=a["caption"], priority=2)
+        except Exception as e:  # noqa: BLE001
+            return _err(str(e))
+        await hub.emit({"t": "sketch", "job": job["id"], "caption": a["caption"]})
+        return _text("sketch under way; it appears in the tale here. Go on with the story.")
 
     @tool("offer_paths",
           "Show 2-4 Paths as clickable cards (the player may also type something else). Don't repeat them in text.",
@@ -696,6 +865,10 @@ def build(hub: Hub, turn: dict | None = None):
             except ValueError:
                 paths = [paths]
         paths = [str(p) for p in paths][:5]
+        if not cp.load_settings()["play"]["paths"] and not turn.get("asked_paths"):
+            return _text("Not shown: Path cards are off in this campaign, so the player makes their own choices. "
+                         "Don't list the options in your text either. If the closing question is written, your "
+                         "turn is over.")
         if not await outcome_told():
             # Keep the cards; the engine shows them at the end of the turn, once the story is told.
             turn["held_paths"] = paths
@@ -709,9 +882,9 @@ def build(hub: Hub, turn: dict | None = None):
         return _text("Paths are now shown to the player as cards. Your turn is over: write nothing more. "
                      "No recap, no summary, no prompt to pick a card; the table hides any text after this.")
 
-    tools = [request_roll, fight, journey, roll_adversary, ask, roll_table, get_tn, note_new, note_get, note_set,
-             advance_time, deadline, counter, move, place, plan_journey, region_map, site_plan, site_explore,
-             show_map, set_scene, queue_art, offer_paths]
+    tools = [request_roll, fight, council, fellowship, journey, roll_adversary, ask, roll_table, get_tn, note_new, note_get,
+             note_set, advance_time, deadline, counter, move, place, plan_journey, region_map, site_plan, site_explore,
+             show_map, set_scene, queue_art, sketch, offer_paths, oracle_reading]
     server = create_sdk_mcp_server(name=SERVER, version="1.0.0", tools=tools)
     names = [f"mcp__{SERVER}__{t.name}" for t in tools]
     return server, names

@@ -57,12 +57,50 @@ def sheet() -> dict:
         fm = _fm(st)
         out["state"] = {k: fm.get(k) for k in ("date", "location", "eye_awareness", "hunt_threshold", "phase",
                                                "day", "time", "deadlines", "counters", "mission", "journey")}
+    out["panels"] = _panels((out["hero"] or {}).get("xp"))
     from . import panels  # noqa: F811
     try:
         out["tale"] = panels.tale(out["state"])
     except Exception:  # noqa: BLE001 - the side panels must render even if a note is malformed
         out["tale"] = {}
     return json.loads(json.dumps(out, default=str))
+
+
+def _panels(xp: dict | None) -> dict:
+    """The procedure panels as their saved state has them, so a page that connects (after a break, a restart or a
+    long session) shows them as they are, not as far back as the event log reaches."""
+    from . import council, fellowship, fight, journey
+    out: dict[str, Any] = {}
+    for key, view in (("fight", lambda: fight.public_view(fight.load(), _portrait)),
+                      ("council", lambda: council.public_view(council.load(), _portrait)),
+                      ("journey", lambda: journey.public_view(journey.load())),
+                      ("fellowship", lambda: fellowship.public_view(fellowship.load(), xp))):
+        try:
+            out[key] = view()
+        except Exception as e:  # noqa: BLE001 - one bad state file must not stop the sheet
+            log.warning("couldn't show the %s panel: %s", key, e)
+    return out
+
+
+def open_procedures() -> list[str]:
+    """What is still under way on the table (a fight, a council, a journey, a Fellowship Phase), in a few words."""
+    from . import council, fellowship, fight, journey
+    out = []
+    for name, mod in (("fight", fight), ("council", council), ("journey", journey), ("fellowship", fellowship)):
+        try:
+            st = mod.load()
+        except Exception:  # noqa: BLE001
+            st = None
+        if st:
+            title = st.get("title") or st.get("place") or ""
+            out.append(f"{name}" + (f" '{title}'" if title else ""))
+    return out
+
+
+def _hero_xp() -> dict:
+    """The hero's unspent Skill and Adventure points (`xp` in the hero note)."""
+    h = vault.hero_note()
+    return (_fm(h).get("xp") or {}) if h else {}
 
 
 def _portrait(name: str) -> str | None:

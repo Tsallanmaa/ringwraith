@@ -3,7 +3,7 @@
 Queue:   <vault>/.ringwraith/art-queue.jsonl   (one JSON job per line, pending only)
 Done:    <vault>/.ringwraith/art-done.jsonl
 Worker:  `ringwraith art worker` (run in the background). Only one runs: it holds art-worker.lock for its
-         whole life. art-worker.json records its last check-in and pid, for `status`.
+         whole life, and `status` asks the lock whether one is running.
 When a job finishes, the image goes to 90 Assets/<folder>/ and, if the job names a note, the note gets it
 (see attach_image: a portrait or scenery becomes the note's `image:`; a scene painting is only added).
 """
@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-import os
 import re
 import time
 import uuid
@@ -25,9 +24,10 @@ from . import vault
 from . import fileio
 
 ASSET_FOLDER = {"portrait": "portraits", "adversary": "adversaries", "scenery": "scenery",
-                "item": "items", "scene": "scenes"}
+                "item": "items", "scene": "scenes", "sketch": "sketches"}
 MAX_ATTEMPTS = 3
 RETRY_DELAY = 20      # seconds between retries of a failed job
+UNREACHABLE_DELAY = 30   # seconds between looks at an image server that isn't answering
 
 
 def _paths(slug: str | None = None, root: Path | None = None) -> dict[str, Path]:
@@ -64,10 +64,12 @@ def _update_queue(f: Path, change) -> list[dict]:
 def enqueue(preset: str, subject: str, note: str | None = None, name: str | None = None,
             priority: int = 5, seed: int | None = None, slug: str | None = None,
             root: Path | None = None, mood: str | None = None, time: str | None = None,
-            characters: list[str] | None = None) -> dict:
+            characters: list[str] | None = None, look: str | None = None) -> dict:
     if preset not in art.PRESETS:
         raise art.ArtError(f"unknown preset {preset!r}")
     art.build_prompt(preset, subject, mood, time)   # validates mood and time
+    if look:
+        art.find_look(cp.load_settings(slug, root)["art"], look)   # validates the look
     paths = _paths(slug, root)
     note_rel = None
     if note:
@@ -76,7 +78,7 @@ def enqueue(preset: str, subject: str, note: str | None = None, name: str | None
     base = vault.slugify(name or (Path(note_rel).stem if note_rel else subject[:40])) or "image"
     job = {"id": uuid.uuid4().hex[:8], "preset": preset, "subject": subject, "note": note_rel,
            "file": f"90 Assets/{ASSET_FOLDER[preset]}/{base}-{uuid.uuid4().hex[:4]}.png",
-           "priority": priority, "seed": seed, "mood": mood, "time": time, "characters": list(characters or []), "queued": dt.datetime.now().isoformat(timespec="seconds")}
+           "priority": priority, "seed": seed, "mood": mood, "time": time, "characters": list(characters or []), "look": look, "queued": dt.datetime.now().isoformat(timespec="seconds")}
     _update_queue(paths["queue"], lambda jobs: jobs + [job])
     return job
 
@@ -105,9 +107,9 @@ def _attach(vroot: Path, job: dict) -> None:
 def attach_image(fm: dict, body: str, file: str, preset: str) -> tuple[dict, str]:
     """Put a finished picture into its note. A portrait, adversary, item or scenery picture is the note's
     own picture: it becomes `image:` and replaces the picture right under the title (only that one; other
-    embeds in the note, such as a chronicle's paintings, are left alone). A scene painting is added at the
-    end and never becomes `image:`, since `image:` is the face used to paint that character later."""
-    if preset == "scene":
+    embeds in the note, such as a chronicle's paintings, are left alone). A scene painting or sketch is added at
+    the end and never becomes `image:`, since `image:` is the face used to paint that character later."""
+    if preset in ("scene", "sketch"):
         embed = f"![[{file}]]"
         return fm, body if embed in body else body.rstrip() + "\n\n" + embed + "\n"
     fm = dict(fm, image=f"[[{file}]]")
@@ -138,12 +140,29 @@ def _portrait_of(vroot: Path, name: str, slug=None, root=None) -> Path | None:
 
 
 def job_refs(vroot: Path, job: dict, slug=None, root=None) -> list[tuple[str, Path]]:
+    if job.get("look") or job.get("preset") == "sketch":
+        # a look's LoRA fits only the main model, which paints without references; a sketch is pencil, not
+        # an edit of colour portraits
+        return []
     refs = []
     for name in job.get("characters") or []:
         f = _portrait_of(vroot, name, slug, root)
         if f:
             refs.append((name, f))
     return refs[:art.MAX_REFS]
+
+
+def _look(s_art: dict, job: dict, main_model: bool, log) -> "art.Look | None":
+    """The job's look, if it can be used: a sketch takes the look named 'sketch' when there is one. A look that
+    has gone (settings changed, file moved) or the fallback model means the house style instead."""
+    name = job.get("look") or ("sketch" if job["preset"] == "sketch" and "sketch" in art.look_names(s_art) else None)
+    if not name or not main_model:
+        return None
+    try:
+        return art.find_look(s_art, name)
+    except art.ArtError as e:
+        log(f"look {name}: {e}; painting without it")
+        return None
 
 
 def run_worker(slug: str | None = None, root: Path | None = None, once: bool = False,
@@ -172,7 +191,6 @@ def _work(slug, root, once: bool, idle_exit_minutes: float, log, paths: dict[str
         if _code_stamp() != stamp:
             log("art code changed; this worker stops so an up-to-date one can take over")
             break
-        fileio.atomic_write(paths["beat"], json.dumps({"t": time.time(), "pid": os.getpid()}))   # for `status`
         jobs = _read_jobs(paths["queue"])
         if not jobs:
             if once or time.time() - idle_since > idle_exit_minutes * 60:
@@ -198,13 +216,22 @@ def _work(slug, root, once: bool, idle_exit_minutes: float, log, paths: dict[str
                                          seed=job.get("seed"), mood=job.get("mood"), time_=job.get("time"),
                                          style=cp.load_settings(slug, root)["art"].get("style"))
             else:
+                s_art = cp.load_settings(slug, root)["art"]
                 r = art.render(c.lemonade_url, use, job["preset"], job["subject"], vroot / job["file"],
                                seed=job.get("seed"), mood=job.get("mood"), time=job.get("time"),
-                               style=cp.load_settings(slug, root)["art"].get("style"))
+                               style=s_art.get("style"), look=_look(s_art, job, use == model, log))
             _attach(vroot, job)
             job.update(status="done", seconds=r.seconds, seed=r.seed, model=use)
             done_count += 1
             log(f"done {job['file']} ({r.seconds}s)")
+        except art.Unreachable as e:
+            # The server is down, not the job: keep it queued without spending an attempt, and wait.
+            log(f"image server not reachable; waiting ({e})")
+            last_model = None              # it may come back with other models loaded
+            if once:
+                break
+            time.sleep(UNREACHABLE_DELAY)
+            continue
         except Exception as e:  # noqa: BLE001 - keep the worker alive; record the failure
             job["attempts"] = job.get("attempts", 0) + 1
             job["error"] = str(e)[:300]
@@ -218,8 +245,7 @@ def _work(slug, root, once: bool, idle_exit_minutes: float, log, paths: dict[str
             job["status"] = "failed"
             log(f"failed {job['id']}: {e}")
         _update_queue(paths["queue"], lambda q: [j for j in q if j["id"] != job["id"]])
-        with paths["done"].open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(job, ensure_ascii=False) + "\n")
+        fileio.append_line(paths["done"], json.dumps(job, ensure_ascii=False))
         idle_since = time.time()
-    paths["beat"].unlink(missing_ok=True)
+    paths["beat"].unlink(missing_ok=True)       # the heartbeat file of older versions; the lock says it now
     return done_count

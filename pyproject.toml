@@ -28,7 +28,7 @@ ringwraith = "ringwraith.cli:main"
 where = ["tools"]
 
 [tool.setuptools.package-data]
-"ringwraith.web" = ["prompt.md", "static/*"]
+"ringwraith.web" = ["prompt.md", "static/*", "static/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

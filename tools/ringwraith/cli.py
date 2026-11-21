@@ -121,31 +121,9 @@ def cmd_guard(args: argparse.Namespace) -> int:
 
 # ------------------------------------------------------------------- dice
 
-def _settings_or_none():
-    from . import campaign as cp
-    try:
-        return cp.load_settings()
-    except cp.CampaignError:
-        return None
-
-
-def _log_roll(kind: str, label: str | None, text: str) -> None:
-    from . import ops
-    ops.log_roll(kind, label, text)
-
-
 def cmd_roll(args: argparse.Namespace) -> int:
     from . import dice
 
-    s = _settings_or_none()
-    if (s and s["dice"]["mode"] == "manual" and not args.adversary and not args.auto
-            and args.feat is None):
-        need = 1 if args.favoured == args.ill else 2
-        n = max(0, args.rating + args.bonus - args.penalty + ((2 if args.inspired else 1) if args.hope else 0))
-        _out(f"MANUAL DICE: ask the player to roll {need} Feat di{'e' if need == 1 else 'ce'}"
-             f"{' (' + ('favoured' if args.favoured else 'ill-favoured') + ')' if need == 2 else ''}"
-             f" and {n} Success dice, then re-run with --feat ... --success ...")
-        return 3
     r = dice.test(
         args.rating, args.tn,
         favoured=args.favoured, ill=args.ill, bonus=args.bonus, penalty=args.penalty,
@@ -153,7 +131,6 @@ def cmd_roll(args: argparse.Namespace) -> int:
         feat=args.feat, success=args.success,
     )
     text = dice.describe(r)
-    _log_roll("adversary" if args.adversary else "test", args.label, text)
     _out(json.dumps(r.as_dict()) if args.json else text)
     return 0
 
@@ -189,13 +166,13 @@ def cmd_table(args: argparse.Namespace) -> int:
     from . import ops
     for _ in range(args.times):
         _out(ops.roll_table(args.id, favoured=args.favoured, ill=args.ill, column=args.column, given=args.given,
-                            label=args.label)[1])
+                            label=args.label, log=False)[1])
     return 0
 
 
 def cmd_ask(args: argparse.Namespace) -> int:
     from . import ops
-    _out(ops.ask(args.chance, args.question, favoured=args.favoured, ill=args.ill, given=args.feat)[3])
+    _out(ops.ask(args.chance, args.question, favoured=args.favoured, ill=args.ill, given=args.feat, log=False)[3])
     return 0
 
 
@@ -234,47 +211,6 @@ def cmd_dice_mode(args: argparse.Namespace) -> int:
     else:
         s = cp.load_settings()
     _out(f"dice mode: {s['dice']['mode']}")
-    return 0
-
-
-def cmd_time(args: argparse.Namespace) -> int:
-    from . import clock
-
-    if args.advance:
-        day, warnings = clock.advance(args.advance, args.at)
-        _out(f"day {day}")
-        for w in warnings:
-            _out(w)
-    elif args.at:
-        clock.set_time(args.at)
-    fm = clock.state()[1]
-    _out(f"day {clock.today(fm)}" + (f", {fm['time']}" if fm.get("time") else "") + f" ({fm.get('date', '')})")
-    for line in clock.describe(fm):
-        _out("  " + line)
-    return 0
-
-
-def cmd_deadline(args: argparse.Namespace) -> int:
-    from . import clock
-
-    if args.action == "add":
-        e = clock.add_deadline(args.name, in_days=args.in_days, due=args.due, note=args.note or "")
-        _out(f"deadline: {e['name']} on day {e['due']}")
-    elif args.action == "done":
-        gone = clock.remove("deadlines", args.name)
-        _out(f"removed {gone['name']}" if gone else f"no deadline {args.name!r}")
-    return 0
-
-
-def cmd_counter(args: argparse.Namespace) -> int:
-    from . import clock
-
-    if args.action == "add":
-        e = clock.add_counter(args.name, since=args.since)
-        _out(f"counter: {e['name']} since day {e['since']}")
-    elif args.action == "done":
-        gone = clock.remove("counters", args.name)
-        _out(f"removed {gone['name']}" if gone else f"no counter {args.name!r}")
     return 0
 
 
@@ -327,7 +263,7 @@ def cmd_chronicle(args: argparse.Namespace) -> int:
     from . import vault
     note = vault.session_note(number)
     if not note.exists():
-        raise SystemExit(f"{note.name} doesn't exist; create it first (ringwraith note new session ...)")
+        raise SystemExit(f"{note.name} doesn't exist; create it first (note_new, kind session)")
     chronicle.write(note, text)
     _out(f"wrote the chronicle of play session {args.play if args.play >= 0 else len(plays) + args.play} "
          f"({end - start} events, {text.count('![[')} images) into {note.name}")
@@ -358,10 +294,7 @@ def _draw_road(n: int) -> None:
 def cmd_map(args: argparse.Namespace) -> int:
     from . import geo
 
-    if args.map_cmd == "build":
-        made = geo.build_images(force=args.force, log=_out)
-        _out(f"{len(made)} map image(s) written" if made else "map images already in the vault (use --force)")
-    elif args.map_cmd == "place":
+    if args.map_cmd == "place":
         e = geo.add_place(args.name, map_id=args.map, at=args.at, near=args.near, bearing=args.bearing,
                           miles=args.miles, state=args.state, note=args.note or "")
         _out(f"{e['name']}: {e['map']} {e['at']} ({e.get('state') or 'no state'})")
@@ -400,27 +333,6 @@ def cmd_map(args: argparse.Namespace) -> int:
                     bounds=g.get("bounds") if isinstance(g.get("anchor"), dict) else None)
         g = regions.create(spec)
         _out(f"drew {g['title']} ({g['id']}): bounds {g['bounds']} miles")
-    elif args.map_cmd == "notes":
-        for f in geo.write_notes():
-            _out(f"note: {f.name}")
-    elif args.map_cmd == "log":
-        for leg in geo.legs():
-            _out(f"day {leg['day']} {leg.get('time', '')}: {', '.join(leg['who'])} {leg['from']} -> {leg['to']} ({leg['mode']})")
-    return 0
-
-
-def cmd_site(args: argparse.Namespace) -> int:
-    from . import sites
-
-    if args.site_cmd == "list":
-        for st in sites.all_sites():
-            seen = sum(1 for r in st["rooms"] if r.get("explored"))
-            _out(f"{st['id']:24} {st['title']} (at {st['place']}): {seen}/{len(st['rooms'])} rooms explored")
-    elif args.site_cmd == "render":
-        _out(str(sites.render_to_vault(sites.load(args.id))))
-    elif args.site_cmd == "explore":
-        st = sites.explore(args.id, args.rooms)
-        _out(str(sites.render_to_vault(st)))
     return 0
 
 
@@ -555,12 +467,6 @@ def cmd_note(args: argparse.Namespace) -> int:
             "## What the hero has seen of it" if fm.get("type") == "adversary" else vault.ENCOUNTERS)
         _out(f"{path.name}: {vault.add_encounter(path, args.text, session, day, section)}")
         return 0
-    if args.note_cmd == "sort-encounters":
-        new = vault.sort_encounters(body)
-        if new != body:
-            vault.write_note(path, fm, new)
-        _out(f"{path.name}: encounters in story order")
-        return 0
     if args.note_cmd == "set":
         from . import fileio
         bad = [kv for kv in args.pairs if "=" not in kv]
@@ -578,15 +484,14 @@ def cmd_note(args: argparse.Namespace) -> int:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    from . import artqueue
+    from . import art, artqueue
     from . import campaign as cp
     from . import vault
 
     try:
         d = cp.campaign_dir()
     except cp.CampaignError:
-        _out("Ringwraith: no active campaign. Start one with /session-zero." if args.hook
-             else "no active campaign")
+        _out("no active campaign")
         return 0
     s = cp.load_settings()
     meta = s.get("campaign", {})
@@ -598,14 +503,12 @@ def cmd_status(args: argparse.Namespace) -> int:
     _out(f"Ringwraith campaign: {meta.get('name', d.name)} [{d.name}] at {d}")
     _out(f"mode={meta.get('mode')} easy={easy} encounters={s['difficulty'].get('encounters', 'story')} "
          f"dice={s['dice']['mode']} art={art_on} "
-         f"(model {s['art'].get('model') or 'Z-Image-Turbo-Q8B'})")
+         f"(model {s['art'].get('model') or art.DEFAULT_MODEL})")
     _out("state: " + ", ".join(f"{k}={v}" for k, v in state.items()))
     _out(f"last session note: {sessions[-1].relative_to(d) if sessions else 'none'}")
     jobs = artqueue.pending()
     worker = "running" if artqueue.worker_alive() else "stopped"
     _out(f"art queue: {len(jobs)} pending; worker {worker}")
-    if args.hook:
-        _out("Playing? Use /session-start (or /session-zero for a new campaign).")
     return 0
 
 
@@ -762,8 +665,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--feat", nargs="+", help="physical result(s): 1-10, eye, gandalf")
     p.add_argument("--success", nargs="*", type=int, help="physical Success dice results")
     p.add_argument("--json", action="store_true")
-    p.add_argument("--auto", action="store_true", help="roll by script even in manual dice mode")
-    p.add_argument("--label", help="what the roll is for (logged)")
     p.set_defaults(func=cmd_roll)
 
     p = sub.add_parser("odds", help="chance of success for a hero test, with and without Hope")
@@ -841,12 +742,9 @@ def build_parser() -> argparse.ArgumentParser:
     n.add_argument("text", help="what happened, in a sentence or two (wiki-link people and places)")
     n.add_argument("--session", type=int, help="default: the current session")
     n.add_argument("--day", type=int, help="the tale day (default: today in the tale)")
-    n = nsub.add_parser("sort-encounters", help="put a note's Encounters in story order")
-    n.add_argument("ref")
     p.set_defaults(func=cmd_note)
 
     p = sub.add_parser("status", help="active campaign summary")
-    p.add_argument("--hook", action="store_true", help="SessionStart hook output")
     p.set_defaults(func=cmd_status)
 
     p = sub.add_parser("settings", help="show or change campaign settings (dotted key, YAML value)")
@@ -865,25 +763,6 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("tn", help="Target Number for an Attribute (hero) or Readiness (Band); respects easy mode")
     p.add_argument("attribute", type=int)
     p.set_defaults(func=cmd_tn)
-
-    p = sub.add_parser("time", help="day of the tale, deadlines and counters (shown in the web table)")
-    p.add_argument("--advance", type=int, metavar="DAYS", help="move the tale on by DAYS")
-    p.add_argument("--at", metavar="TIME", help="time of day, e.g. dawn, midday, nightfall")
-    p.set_defaults(func=cmd_time)
-
-    p = sub.add_parser("deadline", help="add or finish a deadline the hero knows about")
-    p.add_argument("action", choices=["add", "done"])
-    p.add_argument("name")
-    p.add_argument("--in", dest="in_days", type=int, metavar="DAYS")
-    p.add_argument("--due", type=int, metavar="DAY", help="the day it falls on (instead of --in)")
-    p.add_argument("--note")
-    p.set_defaults(func=cmd_deadline)
-
-    p = sub.add_parser("counter", help="add or finish a count-up (e.g. days someone has been missing)")
-    p.add_argument("action", choices=["add", "done"])
-    p.add_argument("name")
-    p.add_argument("--since", type=int, metavar="DAY", help="the day it started (default today)")
-    p.set_defaults(func=cmd_counter)
 
     p = sub.add_parser("chronicle", help="write a session as played at the web table (story, images, rolls) "
                                          "into its session note")
@@ -906,8 +785,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("map", help="maps, places, whereabouts and the travel log")
     msub = p.add_subparsers(dest="map_cmd", required=True)
-    m = msub.add_parser("build", help="put the map images into the campaign vault")
-    m.add_argument("--force", action="store_true")
     m = msub.add_parser("place", help="add or move a campaign place")
     m.add_argument("name")
     m.add_argument("--map")
@@ -927,7 +804,6 @@ def build_parser() -> argparse.ArgumentParser:
     msub.add_parser("where", help="where everyone is, and known places")
     m = msub.add_parser("session", help="draw this session's map(s) and refresh the map notes in Obsidian")
     m.add_argument("--session", type=int)
-    msub.add_parser("notes", help="refresh the map notes and travel log in 60 Maps/")
     m = msub.add_parser("region", help="draw (or redraw) a region map from .ringwraith/regions/<id>.yaml")
     m.add_argument("id")
     m = msub.add_parser("journey", help="count a journey in Eriador hexes, with the land types (Loremaster only)")
@@ -935,18 +811,7 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("to")
     m.add_argument("--via")
     m.add_argument("--show", action="store_true", help="draw the planned route on the player's map")
-    msub.add_parser("log", help="the travel log")
     p.set_defaults(func=cmd_map)
-
-    p = sub.add_parser("site", help="site plans (buildings, ruins, delves); write the plan file, then render")
-    ssub = p.add_subparsers(dest="site_cmd", required=True)
-    ssub.add_parser("list")
-    sp = ssub.add_parser("render", help="draw a site plan into the vault")
-    sp.add_argument("id")
-    sp = ssub.add_parser("explore", help="reveal rooms and redraw")
-    sp.add_argument("id")
-    sp.add_argument("rooms", nargs="+")
-    p.set_defaults(func=cmd_site)
 
     p = sub.add_parser("art", help="image generation via Lemonade")
     asub = p.add_subparsers(dest="art_cmd", required=True)

@@ -25,7 +25,8 @@ the hero would know with `known`. Call `set_scene` with mood `battle` when it br
      would cost; the tray shows the exact odds when the Clash is rolled.
 2. **Objective** (if any): give it a Resistance by the procedure.
 3. **Battlefield:** `roll_table` `battlefield-aspect-overland` (`battlefield-aspect` underground or in ruins), and
-   note the advantages and complications it creates.
+   note the advantages and complications it creates. On the Fight panel give each its `effect` (+1d, −1d),
+   `persistent` if it lasts the battle, and a one-line `text` in story terms (the player's tooltip).
 4. **Get in position.** The hero rolls BATTLE (`request_roll`, Favoured or Ill-favoured by the situation). This
    gives an advantage or a complication for the first Clash.
 5. **Each Clash:**

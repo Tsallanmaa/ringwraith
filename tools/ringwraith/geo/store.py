@@ -61,7 +61,7 @@ def legs(slug: str | None = None, root: Path | None = None) -> list[dict]:
     key = _stamp([f])
     hit = _cache.get(str(f))
     if not (hit and hit[0] == key):
-        hit = (key, [json.loads(line) for line in f.read_text(encoding="utf-8").splitlines() if line.strip()])
+        hit = (key, fileio.read_jsonl(f))
         _cache[str(f)] = hit
     return copy.deepcopy(hit[1])
 
@@ -187,8 +187,7 @@ def _move_group(who, to, frm, via, mode, note, day, time, hero, **kw) -> dict:
            "map": target, "stops": stops, "path": path, "mode": mode, "note": note,
            "logged": dt.datetime.now().isoformat(timespec="seconds")}
     _, lf = _files(**kw)
-    with lf.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(leg, ensure_ascii=False) + "\n")
+    fileio.append_line(lf, json.dumps(leg, ensure_ascii=False))
     for w in who:
         data["whereabouts"][w] = {"place": t_name, "since_day": leg["day"]}
     if data.get("plan", {}).get("to") == t_name:
@@ -246,6 +245,36 @@ def reroute_legs(**kw) -> int:
         out.append(json.dumps(leg, ensure_ascii=False))
     fileio.atomic_write(lf, "\n".join(out) + "\n")
     return changed
+
+
+@fileio.with_lock
+def remap_points(map_id: str, convert, **kw) -> int:
+    """Move every campaign place and recorded route stored on `map_id` through `convert(xy) -> xy`. A redrawn
+    region gets a new frame and scale; the points stored in its pixels must follow, or they all shift."""
+    def conv(p):
+        return [round(c, 1) for c in convert(p)]
+    data, n = load(**kw), 0
+    for pl in data["places"].values():
+        if pl.get("map") == map_id and pl.get("at"):
+            pl["at"], n = conv(pl["at"]), n + 1
+    save(data, **kw)
+    _, lf = _files(**kw)
+    if lf.exists():
+        out = []
+        for line in lf.read_text(encoding="utf-8").splitlines():
+            try:
+                leg = json.loads(line)
+            except ValueError:
+                out.append(line)
+                continue
+            if leg.get("map") == map_id:
+                for key in ("stops", "path"):
+                    if leg.get(key):
+                        leg[key] = [conv(p) for p in leg[key]]
+                n += 1
+            out.append(json.dumps(leg, ensure_ascii=False))
+        fileio.atomic_write(lf, "\n".join(out) + "\n" if out else "")
+    return n
 
 
 @fileio.with_lock

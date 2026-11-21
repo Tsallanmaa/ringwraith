@@ -297,6 +297,7 @@ def note_title(f: Path, fm: dict, body: str) -> str:
     return f"Session {fm['session']}" if fm.get("session") else f.stem
 
 
+@fileio.with_lock
 def sync(vault_dir: Path | None = None) -> list[str]:
     """Calendarium frontmatter on session, journey and mission notes; the calendar's today."""
     vault_dir = vault_dir or cp.campaign_dir()
@@ -478,6 +479,7 @@ def statblock_yaml(slug: str, name: str | None = None) -> str:
     return "```statblock\n" + text + "```\n"
 
 
+@fileio.with_lock      # the art worker writes the portrait into the same note
 def statblock(note: str, slug: str) -> Path:
     """Put (or replace) the stat block section in an adversary's vault note."""
     path = vault.resolve_note(note)
@@ -721,6 +723,7 @@ def _ordinal(n: int) -> str:
     return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
 
 
+@fileio.with_lock
 def home(vault_dir: Path | None = None) -> Path:
     """Rewrite the generated block of 00 Home.md (above the links), keeping everything else."""
     vault_dir = vault_dir or cp.campaign_dir()

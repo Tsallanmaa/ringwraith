@@ -256,6 +256,12 @@ def set_path(data: dict, dotted: str, value: Any) -> None:
     node[leaf] = value
 
 
+def safe_filename(name: str) -> str:
+    """A note name without the characters Windows or Obsidian links can't take."""
+    return re.sub(r'[\\/:*?"<>|#^\[\]]', "", name).strip()
+
+
+@fileio.with_lock      # the next session number is a scan then a write: two creators mustn't both take it
 def new_note(kind: str, name: str, slug: str | None = None, root: Path | None = None,
              extra: dict | None = None) -> Path:
     if kind not in NOTE_TYPES:
@@ -270,12 +276,12 @@ def new_note(kind: str, name: str, slug: str | None = None, root: Path | None = 
         values["number"] = n
         fname = f"Session {n:03d}.md"
     else:
-        fname = re.sub(r'[\\/:*?"<>|#^\[\]]', "", name).strip() + ".md"
+        fname = safe_filename(name) + ".md"
     path = folder / fname
     if path.exists():
         raise cp.CampaignError(f"{path.relative_to(vault)} already exists")
     text = _render((TEMPLATES / f"{kind}.md").read_text(encoding="utf-8"), values)
-    path.write_text(text, encoding="utf-8")
+    fileio.atomic_write(path, text)
     if extra:
         fm, body = read_note(path)
         for k, v in extra.items():
@@ -352,13 +358,16 @@ def add_encounter(path: Path, text: str, session: int, day: int | None = None, s
 
 
 def resolve_note(ref: str, slug: str | None = None, root: Path | None = None) -> Path:
-    """Find a note by vault-relative path or by name (case-insensitive)."""
+    """Find a note by vault-relative path or by name (case-insensitive). Only a markdown note inside the campaign
+    vault: an absolute or `../` path is refused, so the note tools can't write anywhere else (or touch the
+    settings and JSON state, which aren't notes)."""
     vault = cp.campaign_dir(slug, root)
-    p = vault / ref
-    if p.is_file():
-        return p
-    if (vault / f"{ref}.md").is_file():
-        return vault / f"{ref}.md"
+    inside = vault.resolve()
+    for p in (vault / ref, vault / f"{ref}.md"):
+        if p.is_file():
+            if p.suffix.lower() != ".md" or not p.resolve().is_relative_to(inside):
+                raise cp.CampaignError(f"{ref!r} is not a note in the campaign vault")
+            return p
     target = ref.lower().removesuffix(".md")
     hits = [f for f in vault.rglob("*.md") if f.stem.lower() == target and "_templates" not in f.parts]
     if len(hits) == 1:

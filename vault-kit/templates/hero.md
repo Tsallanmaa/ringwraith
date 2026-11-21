@@ -8,7 +8,7 @@ age: 0
 patron: ""
 safe_haven: ""
 standard_of_living: ""
-attributes: {strength: 0, heart: 0, wits: 0}     # TNs: `ringwraith tn <score>` (easy mode aware)
+attributes: {strength: 0, heart: 0, wits: 0}     # TNs: the `get_tn` tool (easy mode aware)
 endurance: {max: 0, current: 0}
 hope: {max: 0, current: 0}
 shadow: {points: 0, scars: 0}

@@ -27,7 +27,12 @@ DEFAULTS: dict[str, Any] = {
         "encounters": "story",
     },
     "dice": {"mode": "auto"},          # auto = scripted rolls, manual = player rolls physical dice
-    "art": {"enabled": True, "model": None, "max_per_session": 20, "style": "book"},   # style: book | classic
+    # style: book | classic. lora: an optional style LoRA and its named looks (docs/art-models.md).
+    "art": {"enabled": True, "model": None, "max_per_session": 20, "style": "book", "lora": None},
+    # oracle: who reads the oracles shown at the table, loremaster or player (Ringwraith suggests, the player
+    # decides). paths: show Path cards (offer_paths); off, the player makes every choice unprompted.
+    "play": {"oracle": "loremaster", "paths": True},
+    "table": {"model": None},          # the Loremaster's model (opus, sonnet, a model id); None = Claude Code's default
 }
 
 
@@ -51,7 +56,8 @@ def set_active(slug: str, root: Path | None = None) -> None:
     root = root or vaults_root()
     if not (root / slug).is_dir():
         raise CampaignError(f"no campaign vault {root / slug}")
-    (root / ".active").write_text(slug + "\n", encoding="utf-8")
+    from . import fileio
+    fileio.atomic_write(root / ".active", slug + "\n")
 
 
 def campaign_dir(slug: str | None = None, root: Path | None = None) -> Path:

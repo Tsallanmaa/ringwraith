@@ -1,6 +1,7 @@
 """Security and data safety: the websocket origin check, atomic writes and the data lock, the art worker
 lock, art attaching to notes, encounter sorting, deadline names, and map files that are broken or unbuilt."""
 
+import json
 import threading
 
 import pytest
@@ -83,6 +84,31 @@ def test_a_second_art_worker_does_not_start_while_one_is_rendering(camp):
     finally:
         fileio.release(fd)
     assert not artqueue.worker_alive()
+
+
+def test_a_half_written_log_line_is_skipped_and_the_next_append_starts_fresh(tmp_path):
+    f = tmp_path / "travels.jsonl"
+    f.write_text('{"id": "a"}\n{"id": "b", "fro', encoding="utf-8")      # a crash mid-append
+    fileio.append_line(f, '{"id": "c"}')
+    assert fileio.read_jsonl(f) == [{"id": "a"}, {"id": "c"}]
+    fileio.append_line(tmp_path / "new.jsonl", '{"id": "d"}')
+    assert (tmp_path / "new.jsonl").read_text(encoding="utf-8") == '{"id": "d"}\n'
+
+
+def test_an_image_server_that_is_down_spends_no_attempts(camp, monkeypatch):
+    from ringwraith import art
+    job = artqueue.enqueue("scene", "The ford at night")
+    monkeypatch.setattr(art, "free_vram_for", lambda *a, **k: [])
+
+    def down(*a, **k):
+        raise art.Unreachable("Lemonade not reachable: refused")
+    monkeypatch.setattr(art, "render", down)
+    monkeypatch.setattr(art, "render_with_refs", down)
+    said = []
+    artqueue.run_worker(once=True, log=said.append)
+    queued = artqueue._read_jobs(artqueue._paths()["queue"])
+    assert [j["id"] for j in queued] == [job["id"]] and not queued[0].get("attempts")
+    assert any("not reachable" in s for s in said)
 
 
 # ------------------------------------------------------------------ art attaching to notes
@@ -210,3 +236,57 @@ def test_the_current_place_follows_the_hero(tmp_path, monkeypatch):
     assert st["Tower"] == "current" and st["Mill"] == "visited"
     geo.move(["Ally"], "Tower", hero="Hero", **kw)                 # the Ally comes back to the hero
     assert geo.load(**kw)["states"]["Tower"] == "current"
+
+
+def test_redrawing_a_region_keeps_its_places_and_routes_where_they_were(camp, monkeypatch):
+    from ringwraith import mapdraw
+    from ringwraith.geo import routing, store
+    monkeypatch.setattr(mapdraw, "render_geo", lambda *a, **k: None)
+    spec = {"title": "Test Hills", "anchor": "A", "scale": "land", "parent": "none",
+            "places": [{"name": "A", "at": [0, 0]}, {"name": "B", "at": [80, 30]}]}
+    g1 = regions.create(spec)
+    at = [(40 - g1["bounds"][0]) * g1["px_per_mile"] + 70, (20 - g1["bounds"][1]) * g1["px_per_mile"] + 70]
+    data = geo.load()
+    data["places"]["The Hut"] = {"map": g1["id"], "at": at}
+    geo.save(data)
+    fileio.append_line(store._files()[1], json.dumps({"id": "x", "map": g1["id"], "stops": [at], "path": [at]}))
+    g2 = regions.create(dict(spec, places=spec["places"] + [{"name": "C", "at": [-150, -100]}]))
+    assert (g1["bounds"], g1["px_per_mile"]) != (g2["bounds"], g2["px_per_mile"])
+    moved = geo.load()["places"]["The Hut"]["at"]
+    assert [round(v) for v in routing._to_miles(g2, moved)] == [40, 20]
+    leg = fileio.read_jsonl(store._files()[1])[-1]
+    assert leg["path"] == [moved]
+
+
+def test_the_note_tools_stay_inside_the_vault(camp):
+    for ref in ("../outside.md", str(camp.parent / "outside.md"), ".ringwraith/settings.yaml"):
+        (camp.parent / "outside.md").write_text("x", encoding="utf-8")
+        with pytest.raises(cp.CampaignError):
+            vault.resolve_note(ref)
+    assert vault.resolve_note(".ringwraith/state.md").name == "state.md"
+
+
+def test_the_table_denies_commands_that_would_pull_the_campaign_away():
+    from ringwraith.web import engine
+    rules = engine._blocked_patterns()
+    for c in ("reset", "archive", "serve", "art worker"):
+        assert f"Bash(.venv/Scripts/ringwraith {c} *)" in rules
+    assert not any("ringwraith new" in r or " chronicle" in r for r in rules)   # session zero and end need these
+
+
+def test_the_travel_log_keeps_what_the_player_wrote_around_it(camp):
+    geo.write_notes()
+    f = camp / "60 Maps" / "Travel log.md"
+    fm, body = vault.read_note(f)
+    vault.write_note(f, {**fm, "tags": ["mine"]}, "My own heading line" + body + "Notes of my own after it.")
+    geo.write_notes()
+    fm, body = vault.read_note(f)
+    assert body.lstrip().startswith("My own heading line") and body.rstrip().endswith("Notes of my own after it.")
+    assert fm["tags"] == ["mine"] and body.count("# Travel log") == 1
+
+
+def test_the_guard_sees_lore_however_its_path_is_written():
+    from ringwraith import guard
+    for f in ("./lore/core.md", str(guard.REPO / "lore" / "core.md"), "lore/core.md"):
+        assert guard.check(guard.repo_path(f), None)
+    assert not guard.check(guard.repo_path("./README.md"), None)

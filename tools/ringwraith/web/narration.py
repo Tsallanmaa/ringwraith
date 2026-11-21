@@ -12,12 +12,16 @@ import re
 
 # Text the model writes between tool calls is sometimes its own bookkeeping ("Writing up Fitch and
 # Cob, then the scene..."). Such asides are shown as a faint working note, not as story.
-PLAYER_FACING = {"request_roll", "roll_adversary", "ask", "roll_table", "set_scene", "offer_paths", "fight", "journey"}
+PLAYER_FACING = {"request_roll", "roll_adversary", "ask", "roll_table", "oracle_reading", "set_scene", "offer_paths",
+                 "fight", "journey"}
 ASIDE_START = re.compile(
     r"^(let me|let's|i'll|i will|i'm going|i am going|i need|i've|now (i|let)|next,? i|first,? i|"
     r"writing|updating|checking|recording|saving|noting|creating|adding|looking|reading|loading|"
     r"logging|filing|drafting|wrapping up|queueing|queuing|"
     r"setting up|rolling for|consulting|opening|sorting|one moment|bear with me)\b", re.I)
+# "Looking up, Tomas sees…", "Opening the door, you find…": a gerund that leads into someone doing something is
+# story, not the model's "Checking the sheet, then the threads."
+STORY_GERUND = re.compile(r"^\w+ing\b[^,.]*,\s+(?:[A-Z]\w*|he|she|they|you|it|we|his|her|their|your)\b")
 PLACEHOLDER = re.compile(r"\b(?:the |a )?(?:story|scene|tale|narration) (?:follows|to follow|comes next|is coming)\b|"
                          r"\b(?:back|more) (?:in a moment|shortly)\b", re.I)
 
@@ -105,6 +109,8 @@ RETELL = ("(The table, not the player.) The player hasn't seen what happened aft
 def is_aside(text: str, next_tool: str | None) -> bool:
     t = text.strip()
     if not t or t.startswith(">") or "\n\n" in t or len(t) > 220 or any(q in t for q in '"“”'):
+        return False
+    if ends_with_question(t) or STORY_GERUND.match(t):      # handing the scene back is always story
         return False
     if ASIDE_START.match(t) or PLACEHOLDER.search(t):
         return True

@@ -59,7 +59,7 @@ def test_adjust_clamps_writes_and_toggles(vault_dir):
 
 def test_hand_edits_are_merged_and_told_once(vault_dir, monkeypatch):
     e = eng.Engine.__new__(eng.Engine)
-    e.sheet_changes = {}
+    e.sheet_changes, e.settings_changes = {}, {}
     e.player_changed(panels.adjust("hope", -1))
     total = e.player_changed(panels.adjust("hope", -1))
     assert panels.describe(total) == "Hope 8 → 6"
@@ -70,6 +70,20 @@ def test_hand_edits_are_merged_and_told_once(vault_dir, monkeypatch):
     note = e._table_note()
     assert "Hope 8 → 6" in note and "Shadow" not in note
     assert "changed the hero sheet" not in e._table_note()    # told once
+
+
+def test_settings_changes_are_told_once_and_a_new_model_waits_for_the_next_turn(vault_dir, monkeypatch):
+    e = eng.Engine.__new__(eng.Engine)
+    e.sheet_changes, e.settings_changes, e._reconnect = {}, {}, False
+    e.settings_changed([{"key": "dice.mode", "label": "Dice", "value": "Your own dice"}])
+    assert not e._reconnect
+    e.settings_changed([{"key": "table.model", "label": "Loremaster's model", "value": "Sonnet"}])
+    assert e._reconnect
+    monkeypatch.setattr(eng.gametools, "current_scene", lambda: "Bree")
+    monkeypatch.setattr("ringwraith.clock.state", lambda: (None, {"day": 11, "time": "night"}))
+    note = e._table_note()
+    assert "Dice: Your own dice" in note and "Loremaster's model: Sonnet" in note
+    assert "changed the campaign settings" not in e._table_note()
 
 
 def test_threads_parse_titles_links_and_resolved(vault_dir):

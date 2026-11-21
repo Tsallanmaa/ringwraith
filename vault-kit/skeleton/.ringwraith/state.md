@@ -13,6 +13,8 @@ scene: ""                  # one line: what is happening right now
 
 # Loremaster state (hidden from the player in Obsidian)
 
+## The story so far
+
 ## Current scene
 
 ## Pending consequences

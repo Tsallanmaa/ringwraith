@@ -13,8 +13,22 @@ only; a lone hero (`strider`) skips them.
   Fellowship Phase).
 - Always: `lore/procedures/fellowship-phase.md` and `lore/procedures/advancement.md`.
 
+**The Fellowship panel** keeps the phase's progress, so a phase can run across sessions without a step being done
+twice or forgotten.
+- **Picking up a phase** (`phase: fellowship` in state.md, or a new session or conversation): call `fellowship`
+  (`show`) first and carry on from the step it names. Never redo a step it lists as done.
+- `start` it once the player has chosen the duration: `duration`, `place` (the Safe Haven) and `undertakings` (how
+  many the duration allows).
+- After each step, `update` with `done` and the step: `recovery`, `updates`, `interruption` (Band, unless Hurried),
+  `undertakings`, `close`. Add a one-line `log` of what happened (Hope regained, a rank bought, an Ally Hardened).
+- Each undertaking taken: `update` with `chosen` (a short name). An interruption: `interruption` (one line) and the
+  lowered `undertakings`.
+- The panel shows the hero's Skill and Adventure points from the hero note's `xp`. Spend them there with
+  `note_set` (lower `xp` as ranks are bought), so the panel stays true.
+- `end` it with a one-line outcome after the close step.
+
 1. **Duration.** The player chooses Hurried, Brief or Extended; Yule counts as Extended, with the Yule benefits.
-   Set `phase: fellowship` in state.md.
+   Set `phase: fellowship` in state.md and `start` the panel.
 2. **Recovery.**
    - Hope, Endurance and Wounds by duration.
    - **Band:** Ally injuries, fatigue and wasted Gifts by duration.
@@ -52,4 +66,4 @@ only; a lone hero (`strider`) skips them.
 6. **Close.**
    - Advance fronts for the time that passed, and `advance_time` the days.
    - Update the date and season in state.md and Timeline.md.
-   - Set `phase: adventuring` when it's over.
+   - Set `phase: adventuring` and `end` the panel.

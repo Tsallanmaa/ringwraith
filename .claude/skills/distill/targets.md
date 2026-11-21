@@ -63,7 +63,13 @@ Journeys, Shadow and the Eye:
 The Band and its battles:
 `tables/band-composition.yaml`, `tables/band-gifts.yaml`, `tables/band-stances.yaml`,
 `tables/readiness-bonus.yaml`, `tables/leader-focus.yaml`, `tables/battlefield-aspect.yaml`,
-`tables/war-party-stats.yaml`, `tables/clash-success.yaml`, `tables/clash-setback.yaml`.
+`tables/war-party-stats.yaml`, `tables/clash-success.yaml`, `tables/clash-setback.yaml`,
+`tables/mission-objectives.yaml`.
+
+The Fellowship Phase, experience and patrons:
+`tables/fellowship-interruption.yaml`, `tables/undertakings.yaml`, `tables/skill-special-success-strider.yaml`,
+`tables/experience-milestones-strider.yaml`, `tables/experience-milestones-moria.yaml`, and one
+`patron-quests-<patron>` table per patron, e.g. `patron-quests-gandalf`.
 
 Hero creation: one `chargen-attributes-<culture>` table per culture (the six attribute rows a culture rolls
 on), e.g. `chargen-attributes-men-of-bree`.

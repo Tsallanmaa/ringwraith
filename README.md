@@ -12,7 +12,7 @@ your browser with painted scenes, a dice tray, maps and a campaign vault in Obsi
 ![Obsidian](https://img.shields.io/badge/vault-Obsidian-7a5cc6)
 ![Platform](https://img.shields.io/badge/runs%20on-Windows%20desktop%20with%20a%20GPU-5a9e5a)
 
-<img src="docs/images/inn.jpg" alt="The table at the Prancing Pony: a painted scene, the tale, and the hero and Band panels" width="820">
+<img src="docs/images/inn.jpg" alt="The table at the Prancing Pony: a painted scene, a sketch in the tale of the hall a Dwarf tells of, and the hero and Band panels" width="820">
 
 </div>
 
@@ -25,10 +25,12 @@ your browser with painted scenes, a dice tray, maps and a campaign vault in Obsi
 |---|---|
 | ![The whole painting of the Twenty-first Hall](docs/images/view.jpg) | ![Paths offered as cards](docs/images/paths.jpg) |
 | **Take in the view:** click the painting to see all of it | **Paths:** a few ways forward as cards, or type anything else |
-| ![The dice tray waiting for a roll](docs/images/roll.jpg) | ![A Band battle at the Dimrill Gate](docs/images/battle.jpg) |
-| **The dice tray:** the odds with and without Hope, before you choose | **Battles:** the Fight panel shows what the hero can see |
-| ![The Journey panel on the road to Lórien](docs/images/journey.jpg) | ![The map of the tale](docs/images/map.jpg) |
-| **Journeys:** each day, camp and event on the road, and a cutaway | **The map:** the road so far, who is where, the planned route |
+| ![A council at the Prancing Pony](docs/images/council.jpg) | ![The dice tray waiting for a roll](docs/images/roll.jpg) |
+| **Councils:** how far they are swayed, and the exchanges left | **The dice tray:** the odds with and without Hope, before you choose |
+| ![A Band battle at the Dimrill Gate](docs/images/battle.jpg) | ![The Journey panel on the road to Lórien](docs/images/journey.jpg) |
+| **Battles:** the Fight panel shows what the hero can see | **Journeys:** each day, camp and event on the road, and a cutaway |
+| ![The map of the tale](docs/images/map.jpg) | ![The Tale drawer](docs/images/tale.jpg) |
+| **The map:** the road so far, who is where, the planned route | **The Tale:** the journey under way, open threads and the Compass |
 
 ## Features
 
@@ -36,10 +38,12 @@ your browser with painted scenes, a dice tray, maps and a campaign vault in Obsi
   missions and the Fellowship Phase by the Core Rules, Strider Mode and the Moria solo rules.
 - **Real dice, or yours.** Every roll comes to a tray that shows the odds and lets you decide on Hope. Roll
   there, or roll physical dice and enter them. Oracles and lore tables are rolled in the open.
-- **Panels for what matters now.** Live hero and Band sheets, a Fight panel during combat and battles, and a
-  Journey panel with every march, event and camp on the road, and the fatigue it cost.
+- **Panels for what matters now.** Live hero and Band sheets, a Fight panel during combat and battles, a Council
+  panel while you argue your case, a Journey panel with every march, event and camp on the road and the fatigue
+  it cost, and a Fellowship panel that keeps your place in the Fellowship Phase across sessions.
 - **Painted scenes.** Scenes, portraits and adversaries are painted on your own GPU, in the style of the
-  modern books. Nothing leaves your machine.
+  modern books, and what's told by the fire gets a pencil sketch in the tale. Bring your own style LoRA for
+  extra looks. Nothing leaves your machine.
 - **A map of the tale.** Region maps with the places you've seen, everyone's whereabouts, the travel log day
   by day, the hex grid and a fog of unknown lands.
 - **Story first.** Ringwraith tells outcomes as story and keeps mechanics in a short Loremaster note. With
@@ -122,8 +126,14 @@ you, and sets the opening scene. After that, press **Begin session** to pick up 
 **End session** when you stop; Ringwraith writes the session down and keeps the campaign in order.
 
 Just say what your hero does. Ringwraith asks for rolls when the rules call for them. You can also type
-`/paths` when you're unsure what to do next, `/hooks` for new adventures, and `/oracle` to ask the world a
-question.
+`/paths` when you're unsure what to do next, `/hooks` for new adventures, `/oracle` to ask the world a
+question, and `/steer` to point the tale somewhere ("/steer toward Angmar and the hill-men"): Ringwraith notes it
+in your Compass and brings the story round to it through the world.
+
+You decide how much Ringwraith decides. In **Settings** at the table you can read the oracles yourself
+(Ringwraith suggests what an answer means; you accept it or say what it means instead) and turn off the Path
+cards to come up with every choice on your own. Session zero asks about both, and about a premise for the
+campaign, such as a published adventure you'd like to play through.
 
 The table plays one campaign at a time. To play another, stop the table, switch, and start it again:
 
@@ -139,6 +149,31 @@ Each campaign is a folder in your `vaults` folder. Open it as a vault in Obsidia
 the sessions, the people and places you've met, the threads still open and the maps.
 
 The table is for one player on this computer. It listens only on `127.0.0.1` and refuses other web pages.
+
+### The model and your plan
+
+Ringwraith plays through your Claude login, so play counts against your plan's usage limits like any Claude
+Code work. By default it uses Claude Code's default model for your account. To choose one for a campaign,
+press **Settings** at the table (the same dialog sets the dice, easy mode, encounters and paintings); a new
+model takes over from your next message. From the command line:
+
+```sh
+ringwraith settings table.model sonnet    # or opus, haiku, fable, or a full model id; restart ringwraith serve after
+ringwraith settings table.model null      # back to the default
+```
+
+A Loremaster is a heavy user: every reply carries the rules card, the campaign and the conversation so far,
+and a turn often makes several tool calls (rolls, notes, panels). Two things keep the cost down:
+
+- **A fresh conversation each session.** The conversation's length, more than the model, sets the cost of
+  each turn, because every turn rereads it: a conversation run over several sessions can cost several times as
+  much per turn as a fresh one. So **Begin session** starts a new conversation whenever the last session was
+  ended. Ringwraith remembers the campaign by the vault: a short story-so-far and the current scene in its
+  hidden state, the last session's tale, the threads, the timeline and the notes on everyone met. A session
+  you never ended (a reboot, a closed tab) keeps its conversation.
+- **Pick the model for your plan.** Opus is the most faithful Loremaster; Sonnet costs much less per turn and
+  lets a smaller plan play far longer. On the entry-level paid plan, expect Opus to reach the five-hour limit
+  within a single evening's session; use Sonnet there, and watch your usage in Claude's settings.
 
 ## More
 

@@ -3,6 +3,7 @@
     .venv/Scripts/python scripts/screenshots.py [name ...]     # all shots, or the named ones
     .venv/Scripts/python scripts/screenshots.py --art [key ...] # redraw the paintings (needs Lemonade)
     .venv/Scripts/python scripts/screenshots.py --keep table    # keep the staged vault and print where it is
+    .venv/Scripts/python scripts/screenshots.py --into build/x  # art and shots in build/x, not docs/ (see --looks-from)
 
 The demo tale is docs/screenshots/session.py: its chapters say what the player typed, what Ringwraith told
 and what the tools did. For each shot this script builds a fresh campaign vault in a scratch folder (never in
@@ -52,23 +53,32 @@ def session():
 
 # ---------------------------------------------------------------- paintings
 
-def make_art(keys: list[str]) -> None:
+def make_art(keys: list[str], art_dir: Path = ART_DIR, looks_from: str | None = None,
+             looks: dict[str, str] | None = None) -> None:
+    """Paint the demo's pictures. With looks_from, a campaign's style LoRA paints them: each key in `looks` gets
+    that look, a sketch gets the look named 'sketch' if there is one, the rest stay in the house style."""
     from PIL import Image
     from ringwraith import art
+    from ringwraith import campaign as cp
     from ringwraith import config as cfg
     s = session()
     model = os.environ.get("RINGWRAITH_ART_MODEL", "Z-Image-Turbo-Q8B")
-    ART_DIR.mkdir(parents=True, exist_ok=True)
+    s_art = cp.load_settings(looks_from)["art"] if looks_from else {}
+    art_dir.mkdir(parents=True, exist_ok=True)
     for key in keys or list(s.ART):
         spec = s.ART[key]
-        png = ART_DIR / f"{key}.png"
+        png = art_dir / f"{key}.png"
+        name = (looks or {}).get(key)
+        if not name and spec["preset"] == "sketch" and "sketch" in art.look_names(s_art):
+            name = "sketch"
+        look = art.find_look(s_art, name) if name else None
         res = art.render(cfg.load().lemonade_url, model, spec["preset"], spec["subject"], png, seed=spec["seed"],
-                         mood=spec.get("mood"), time=spec.get("time"), style="book")
+                         mood=spec.get("mood"), time=spec.get("time"), style="book", look=look)
         out = png.with_suffix(".jpg")                           # paintings keep well as JPEG, at a quarter the size
         Image.open(png).convert("RGB").save(out, quality=90)
         png.unlink()
         png.with_suffix(".json").unlink(missing_ok=True)       # the spec in session.py is the record
-        print(f"{key}: {out.relative_to(ROOT)} ({res.seconds}s)", flush=True)
+        print(f"{key}: {out} ({res.seconds}s{', look ' + look.name if look else ''})", flush=True)
 
 
 # ---------------------------------------------------------------- staging
@@ -120,6 +130,13 @@ class Stage:
         if art:
             self.emit({"t": "image", "preset": "scene", "job": None, "url": f"/assets/scenes/{art}.jpg",
                        "subject": title})
+
+    def sketch(self, caption: str, art: str) -> None:
+        """A sketch in the tale, already drawn."""
+        job = self._id()
+        self.emit({"t": "sketch", "job": job, "caption": caption})
+        self.emit({"t": "image", "preset": "sketch", "job": job, "url": f"/assets/sketches/{art}.jpg",
+                   "subject": caption})
 
     # time, places and the sheet
     def clock(self, day: int, time: str) -> None:
@@ -221,6 +238,25 @@ class Stage:
         self.emit({"t": "fight", "fight": None})
         self.emit({"t": "fight_end", "title": done["title"], "kind": done["kind"], "outcome": done["outcome"]})
 
+    # the council
+    def _council(self, state):
+        from ringwraith.web import council as cn, views
+        self.emit({"t": "council", "council": cn.public_view(state, views._portrait)})
+
+    def council_start(self, title, who, request, resistance, attitude=None):
+        from ringwraith.web import council as cn
+        self._council(cn.start(title, who, request, resistance, attitude))
+
+    def council_update(self, **changes):
+        from ringwraith.web import council as cn
+        self._council(cn.update(changes))
+
+    def council_end(self, outcome):
+        from ringwraith.web import council as cn
+        done = cn.end(outcome)
+        self.emit({"t": "council", "council": None})
+        self.emit({"t": "council_end", "title": done["title"], "outcome": done["outcome"]})
+
     # the journey
     def journey_start(self, frm, to, title, season, mode="on foot"):
         from ringwraith import geo
@@ -241,7 +277,7 @@ class Stage:
         self.end_turn()
 
 
-def build_campaign(vaults: Path, regions_from: Path, upto: str, at: str | None = None):
+def build_campaign(vaults: Path, regions_from: Path, upto: str, at: str | None = None, art_dir: Path = ART_DIR):
     """A fresh demo campaign in `vaults`, played up to the chapter `upto` (and its mark `at`, if given)."""
     from ringwraith import campaign as cp, geo, vault
     s = session()
@@ -254,11 +290,11 @@ def build_campaign(vaults: Path, regions_from: Path, upto: str, at: str | None =
     cp.set_value("art.enabled", False)          # no art worker, no image server needed
     shutil.copytree(regions_from / ".ringwraith" / "regions", priv / "regions")
     assets = camp / "90 Assets"
-    for sub in ("scenes", "portraits", "adversaries"):
+    for sub in ("scenes", "portraits", "adversaries", "sketches"):
         (assets / sub).mkdir(parents=True, exist_ok=True)
-    for pic in ART_DIR.glob("*.jpg"):
+    for pic in art_dir.glob("*.jpg"):
         preset = s.ART.get(pic.stem, {}).get("preset")
-        sub = {"scene": "scenes", "adversary": "adversaries"}.get(preset, "portraits")
+        sub = {"scene": "scenes", "adversary": "adversaries", "sketch": "sketches"}.get(preset, "portraits")
         shutil.copy(pic, assets / sub / pic.name)
 
     def with_fm(kind, name, fields, art_key=None, folder="portraits"):
@@ -413,20 +449,20 @@ VIEWS = {
 }
 
 
-def shoot_one(name: str, regions_from: Path, keep: bool) -> None:
+def shoot_one(name: str, regions_from: Path, keep: bool, art_dir: Path = ART_DIR, images: Path = IMAGES) -> None:
     s = session()
     shot = s.SHOTS[name]
     vaults = Path(tempfile.mkdtemp(prefix="rw-demo-"))
     try:
-        stage = build_campaign(vaults, regions_from, shot["upto"], shot.get("at"))
+        stage = build_campaign(vaults, regions_from, shot["upto"], shot.get("at"), art_dir)
         port = free_port()
         srv = serve(stage, port)
-        IMAGES.mkdir(parents=True, exist_ok=True)
-        out = IMAGES / f"{name}.jpg"
+        images.mkdir(parents=True, exist_ok=True)
+        out = images / f"{name}.jpg"
         steps = VIEWS[shot.get("view", "scene")] + list(shot.get("steps", []))
         asyncio.run(photograph(f"http://127.0.0.1:{port}/", out, steps, tuple(shot.get("size", WINDOW))))
         srv.should_exit = True
-        print(f"{name}: {out.relative_to(ROOT)}", flush=True)
+        print(f"{name}: {out}", flush=True)
     finally:
         if keep:
             print(f"  staged vault kept: {vaults}")
@@ -440,21 +476,31 @@ def main() -> None:
     ap.add_argument("--art", action="store_true", help="redraw the paintings (all, or the named keys)")
     ap.add_argument("--regions-from", default="lorien-test", help="campaign slug to copy the region maps from")
     ap.add_argument("--keep", action="store_true", help="keep the staged vaults")
+    ap.add_argument("--into", help="a folder for the art (<into>/art) and the shots (<into>/images) instead of "
+                                   "docs/screenshots/art and docs/images")
+    ap.add_argument("--looks-from", help="with --art and --into: paint with this campaign's style LoRA (art.lora)")
+    ap.add_argument("--look", action="append", default=[], metavar="KEY=LOOK",
+                    help="with --looks-from: the look for one painting (repeatable)")
     ap.add_argument("--one", action="store_true", help=argparse.SUPPRESS)
     a = ap.parse_args()
+    art_dir, images = (Path(a.into).resolve() / "art", Path(a.into).resolve() / "images") if a.into else (ART_DIR, IMAGES)
+    if a.looks_from and (not a.into or art_dir.is_relative_to(ROOT / "docs")):
+        # A style LoRA is the player's own; what it paints never goes into the repository's tracked pictures.
+        sys.exit("--looks-from needs --into a folder outside docs/ (build/ is gitignored)")
     if a.art:
-        make_art(a.names)
+        make_art(a.names, art_dir, a.looks_from, dict(x.split("=", 1) for x in a.look))
         return
     from ringwraith import config as cfg
     regions_from = cfg.load().vaults / a.regions_from
     if not (regions_from / ".ringwraith" / "regions").is_dir():
         sys.exit(f"no region maps in {regions_from}: pass --regions-from <a campaign with the Lórien regions>")
     if a.one:
-        shoot_one(a.names[0], regions_from, a.keep)
+        shoot_one(a.names[0], regions_from, a.keep, art_dir, images)
         return
     names = a.names or list(session().SHOTS)
     for name in names:                    # one process per shot: every shot starts from a clean slate
-        cmd = [sys.executable, __file__, "--one", name, "--regions-from", a.regions_from] + (["--keep"] if a.keep else [])
+        cmd = [sys.executable, __file__, "--one", name, "--regions-from", a.regions_from]
+        cmd += (["--keep"] if a.keep else []) + (["--into", a.into] if a.into else [])
         subprocess.run(cmd, check=True)
 
 

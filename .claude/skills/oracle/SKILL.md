@@ -14,11 +14,14 @@ answer. Details are in `lore/procedures/solo-play.md`.
   - In the OOC summary, give the chance you chose and why, in one short clause.
 - **Open questions:** `roll_table` with `lore-strider` and a `column` (action, aspect or focus).
   - Roll 1–3 columns. Use `lore-moria` when you want a `feature`, which suits places and rooms.
-  - Interpret the words in the light of the scene, the region's lore atoms and Tolkien's world. Offer the
-    interpretation, and let the player suggest another.
+  - Interpret the words in the light of the scene, the region's lore atoms and Tolkien's world, and tell what
+    they mean in the story (when the player reads the oracles, offer it as a suggestion: see below).
 - **Dramatic icons:** when a hero roll succeeds with `{gandalf}`, or fails with `{eye}`, at a dramatic moment,
   roll `fortune-strider` (or `fortune-moria` in band play) or `ill-fortune`. Apply any Eye Awareness changes the
   result gives.
 - **NPC or Ally reactions:** `ask`, with the chance set by their attitude.
+- **When the player reads the oracles** (`play.oracle: player`): after each oracle rolled in the open, call
+  `oracle_reading` with the question, the result and your suggested reading, before telling what follows. The
+  player accepts it or gives their own; play by what it returns.
 - Hidden questions (the answer is for you alone) pass `show_player: false`. Either way, tell what came of it as
   story first; the OOC summary names the oracle.

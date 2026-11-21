@@ -10,6 +10,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from .. import fileio
+
 # Events that are only useful live (streaming deltas, activity) are not written to the log.
 EPHEMERAL = {"text_delta", "activity", "busy", "sheet"}   # a page that connects gets a fresh sheet anyway
 REPLAY_LIMIT = 400
@@ -25,9 +27,8 @@ class Hub:
     async def emit(self, event: dict) -> None:
         event.setdefault("ts", time.time())
         if event["t"] not in EPHEMERAL:
-            self.log_path.parent.mkdir(parents=True, exist_ok=True)
-            with self.log_path.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(event, ensure_ascii=False) + "\n")
+            # synced: the chronicle is written from this log, and a power cut mustn't eat its end
+            fileio.append_line(self.log_path, json.dumps(event, ensure_ascii=False), sync=True)
         dead = []
         for ws in list(self.sockets):
             try:
@@ -47,9 +48,11 @@ class Hub:
                 events.append(json.loads(line))
             except ValueError:
                 continue
-        answered = {e["id"] for e in events if e["t"] in ("roll_result", "roll_cancelled") and "id" in e}
-        for e in events:   # a roll request from a previous run can no longer be answered
-            if e["t"] == "roll_request" and e["id"] not in answered and e["id"] not in self.pending:
+        answered = {e["id"] for e in events
+                    if e["t"] in ("roll_result", "roll_cancelled", "reading_result", "reading_cancelled")
+                    and "id" in e}
+        for e in events:   # a roll or oracle reading asked in a previous run can no longer be answered
+            if e["t"] in ("roll_request", "reading_request") and e["id"] not in answered and e["id"] not in self.pending:
                 e["stale"] = True
         return events
 
@@ -63,6 +66,8 @@ class Hub:
             return await fut
         finally:
             self.pending.pop(iid, None)
+            if fut.cancelled() or not fut.done():    # the tool call was cancelled (Stop, a new session): close the tray on the page
+                asyncio.get_running_loop().create_task(self.emit({"t": f"{kind}_cancelled", "id": iid}))
 
     def answer(self, iid: str, data: dict) -> bool:
         item = self.pending.get(iid)

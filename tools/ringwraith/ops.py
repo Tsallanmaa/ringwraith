@@ -11,6 +11,7 @@ from pathlib import Path
 from . import campaign as cp
 from . import config as cfg
 from . import dice
+from . import fileio
 
 _tables: dict[str, tuple] = {}
 
@@ -22,8 +23,7 @@ def log_roll(kind: str, label: str | None, text: str) -> None:
     except cp.CampaignError:
         return
     line = "\t".join([time.strftime("%Y-%m-%d %H:%M:%S"), kind, label or "-", text.replace("\n", " / ")])
-    with f.open("a", encoding="utf-8") as fh:
-        fh.write(line + "\n")
+    fileio.append_line(f, line)
 
 
 def tables_dir() -> Path:
@@ -47,23 +47,26 @@ def all_tables() -> dict:
 
 
 def ask(chance: str, question: str | None = None, favoured: bool = False, ill: bool = False,
-        given=None) -> tuple[str, object, str, str]:
-    """The Telling table: (chance, feat face, answer, the logged line)."""
+        given=None, log: bool = True) -> tuple[str, object, str, str]:
+    """The Telling table: (chance, feat face, answer, the logged line). log=False for a test from the CLI."""
     from . import tables as tb
     tables = all_tables()
     if "telling" not in tables:
         raise tb.TableError("the Telling table isn't distilled yet (lore/tables/telling.yaml)")
     chance, face, answer = tb.telling(tables["telling"], chance, mode=dice.feat_mode(favoured, ill), given=given)
     text = f"Telling ({chance}) [feat {dice.face_str(face)}] -> {answer}"
-    log_roll("ask", question, text)
+    if log:
+        log_roll("ask", question, text)
     return chance, face, str(answer), text
 
 
 def roll_table(table_id: str, favoured: bool = False, ill: bool = False, column: str | None = None,
-               given=None, label: str | None = None):
-    """Roll a lore table: (the result, the logged line). Raises tables.TableError for an unknown table."""
+               given=None, label: str | None = None, log: bool = True):
+    """Roll a lore table: (the result, the logged line). Raises tables.TableError for an unknown table.
+    log=False for a test from the CLI: the roll log is the session's record of the table's rolls."""
     from . import tables as tb
     r = tb.roll(all_tables(), table_id, mode=dice.feat_mode(favoured, ill), given=given, column=column)
     text = tb.describe(r)
-    log_roll("table", label, text)
+    if log:
+        log_roll("table", label, text)
     return r, text

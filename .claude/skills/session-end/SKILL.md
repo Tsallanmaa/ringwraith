@@ -5,7 +5,9 @@ description: Close a One Ring play session - write the session note, update shee
 
 # End a session
 
-Find a natural pause first: finish the current exchange, but don't force a cliffhanger resolution.
+Find a natural pause first: finish the current exchange, but don't force a cliffhanger resolution. Stopping in
+the middle of a fight, council, journey or Fellowship Phase is fine (step 6). If a roll is waiting, settle it first:
+a roll request doesn't survive the break, so one left waiting has to be asked again next session.
 
 1. **Session note** (the current `Session NNN.md`):
    - **Whereabouts first:** everyone's whereabouts (in `<table-state>`, or `show_map`) should match the fiction.
@@ -41,10 +43,25 @@ Find a natural pause first: finish the current exchange, but don't force a cliff
 5. **Threads:** add new open threads and move resolved ones to Resolved. Add dated events to `Timeline.md`.
 6. **Hidden state:**
    - update `.ringwraith/state.md` (scene line, location, date, Eye Awareness, Hunt threshold, pending consequences);
+   - **tidy the state's body.** It is what the next session's fresh conversation remembers the campaign by, so
+     it must stay short and whole. Keep four sections and nothing else:
+     - `## The story so far`: the whole campaign in at most about 500 words, rewritten (not appended to) each
+       session: who the hero is now, what has happened and why it matters, who stands where, promises and
+       debts. Recent events in more detail, older ones in a line or two;
+     - `## Current scene`: where the tale stopped, in a few sentences;
+     - `## Pending consequences`: what is set to happen, and when;
+     - `## Notes to self`: secrets of play that fit nowhere else (how you mean to play someone, a reveal held back).
+
+     Fold the scene-by-scene notes made during play into these and delete them: the session note keeps the
+     full record. If the file has no `The story so far` yet, write it now from the session notes' tales.
    - the `scene` line describes the current moment in one or two sentences. Don't let it accumulate history ("PREVIOUSLY…"): that belongs in the session note;
    - check the deadlines and counters: close any that were met or missed, or that the story made moot, with
      `deadline` / `counter`. Note in one OOC line what you closed and why;
-   - advance fronts in `fronts.md` and update `secrets.md` with anything revealed.
+   - advance fronts in `fronts.md` and update `secrets.md` with anything revealed;
+   - **stopping part-way through something:** a fight, council, journey or Fellowship Phase still under way stays
+     open (don't `end` it); its tool keeps the state, and the next session picks it up with `show`. Name it in
+     the `scene` line. Anything offered but not yet chosen (recruit candidates, a council's terms, a choice of
+     undertakings) goes into the `scene` line too, in short, so the next session offers the same, not new ones.
 7. **Art:** queue anything iconic from this session that has no image yet (one scene image is a good default) with
    `queue_art`. Every image made this session should appear in the session note (the chronicle and the tale embed them).
 8. **Obsidian:** run `ringwraith obsidian sync` (puts sessions, journeys and missions on the Shire Reckoning

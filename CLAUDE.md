@@ -6,7 +6,7 @@ skills in `.claude/skills`, and an Obsidian kit in `vault-kit/`.
 
 **Play happens only at the web table** (desktop, this machine only). The table runs Claude through the Agent SDK
 with this repo as its working directory. Its Loremaster contract is `tools/ringwraith/web/prompt.md`, followed by
-the rules card `lore/core.md`; the engine (`web/engine.py`) appends both to the system prompt. This file is for
+the rules card `lore/core.md`; the engine (`web/engine.py`) makes them the whole system prompt. This file is for
 development sessions; at the table it only adds the rules below, which don't concern play.
 
 ## How we work

@@ -6,12 +6,16 @@
 - `locked()`: one lock shared by every Ringwraith process (the web table, CLI commands the model runs,
   the art worker), held around each read-modify-write so two writers can't drop each other's change.
   It is re-entrant within a thread, so locked functions may call each other.
+- `append_line(path, line)` / `read_jsonl(path)`: the append-only logs (travels, rolls, art, the table log). A
+  crash mid-append can leave a half line at the end: the next append starts on a fresh line instead of gluing
+  onto it, and reading skips a line that doesn't parse instead of failing the whole log.
 """
 
 from __future__ import annotations
 
 import contextlib
 import functools
+import json
 import os
 import tempfile
 import threading
@@ -20,6 +24,35 @@ from pathlib import Path
 
 LOCK_FILE = Path(tempfile.gettempdir()) / "ringwraith-data.lock"
 LOCK_TIMEOUT = 30.0          # seconds; every locked section is a quick load-modify-save
+
+def append_line(path: Path, line: str, sync: bool = False) -> None:
+    """Append one line (no newline in it) to a log, starting a fresh line if a crash left the last one unfinished."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a+b") as fh:
+        fh.seek(0, os.SEEK_END)
+        lead = b""
+        if fh.tell():
+            fh.seek(-1, os.SEEK_END)
+            if fh.read(1) != b"\n":
+                lead = b"\n"
+        fh.write(lead + line.encode("utf-8") + b"\n")
+        fh.flush()
+        if sync:
+            os.fsync(fh.fileno())
+
+
+def read_jsonl(path: Path) -> list:
+    """The records of a JSON-lines log, skipping lines that don't parse (a crash's half line)."""
+    out = []
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            try:
+                out.append(json.loads(line))
+            except ValueError:
+                continue
+    return out
+
 
 _local = threading.local()
 _thread_lock = threading.RLock()

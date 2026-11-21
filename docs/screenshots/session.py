@@ -53,6 +53,11 @@ ART = {
         "a cloak of dyed green wool, sprigs of dried herbs tied at her belt")),
     "chieftain": dict(preset="adversary", mood="battle", time="dusk", seed=535375114, subject=(
         "an orc-chieftain in black iron mail with a notched scimitar, blood on one shoulder, roaring")),
+    # A sketch in the tale: the hall as Bryni tells of it at the inn, long before the company sees it.
+    "sketch-hall": dict(preset="sketch", seed=2965, subject=(
+        "a vast hall of the Dwarves under the mountain, rows of tall carved stone pillars like tree trunks "
+        "marching away into darkness, one pillar near the front marked with a small ring of runes, a single "
+        "shaft of light falling from high above, no figures")),
 }
 
 HERO_SHEET = {
@@ -123,7 +128,9 @@ def pony(t):
         "Downs, last autumn.\"\n\n"
         "From inside her coat she draws a roll of oiled cloth and lays it on the table between the candle and your "
         "ale. Charcoal rubbings: lines of angular runes, and below them the plan of a hall drawn as a field of "
-        "dots, row on row, with one dot ringed twice.\n\n"
+        "dots, row on row, with one dot ringed twice.")
+    t.sketch("The Twenty-first Hall, as Bryni tells it", "sketch-hall")
+    t.tell(
         "\"The Twenty-first Hall of the North End. My grandfather's grandfather left something by the seventh "
         "pillar from the eastern arch, the night the Dwarves fled. I mean to bring it home.\" Her finger rests on "
         "the ringed dot. \"I need a few who don't run.\"\n\n"
@@ -151,19 +158,63 @@ def pony(t):
     t.end_turn()
 
 
-def hall(t):
-    """Under the mountain: the Twenty-first Hall, an oracle question, and a roll waiting in the tray."""
+def gytha(t):
+    """Back in Bree: Gytha won over in a council (the shot stops halfway, with the Council panel open)."""
     t.player("Shake on it tonight, and send word to Gytha in the Chetwood")
     t.tell(
         "You put out your hand. Bryni looks at it a moment, then takes it in a grip like a vice. Oswin slaps the "
         "table, and the hobbit at the long table loses his place in the song for good.\n\n"
         "The message to Gytha goes out with a carter at first light. Three days later she walks in out of the "
-        "Chetwood with her pack on her back, hears the word *Moria* once, and says nothing at all. She just starts "
-        "sorting her herbs.\n\n"
+        "Chetwood with her pack on her back, hears the word *Moria* once, and sets the pack down by the door "
+        "without opening it.\n\n"
+        "\"No,\" she says. \"Not under the mountain. Not for a box I'm not allowed to see.\"\n\n"
         "> OOC:\n> - **The Band:** Bryni Stonehelm joins the company.\n"
-        "> - **A new thread:** Bryni's errand.\n\nThe road east is long. Where do you begin?")
+        "> - **A council:** Gytha won't come unless she is persuaded.\n\nWhat does Edwy do?")
+    t.end_turn()
+    t.clock(day=6, time="dusk")
+
+    t.player("I sit down across from her, not beside Bryni. I tell her what I saw in Bryni's face at the Pony, "
+             "and that I wouldn't ask if I didn't think we'd need her hands down there.")
+    t.council_start("Gytha's answer", ["Gytha"], "Come with us under the mountain", resistance=6,
+                    attitude="unwilling")
+    t.roll("Edwy", "Courtesy (introduction)", rating=2, tn=16, stakes="how long Gytha will hear him out",
+           feat=[7], success=[4, 6])
+    t.council_update(rounds=4, log="Edwy sits across from her, not beside Bryni.")
+    t.tell(
+        "Gytha doesn't look up from the knot she is picking at on her pack strap, but she stops picking at it.\n\n"
+        "\"You saw her face,\" she says. \"So did I, when the carter said her name. That's a frightened woman, "
+        "Edwy Rushworth. Frightened people lead you into places and then find they can't lead you out.\"\n\n"
+        "> OOC:\n> - **Courtesy:** success (TN 16, total 17). She'll hear you out, for a while.\n\nWhat do you say?")
     t.end_turn()
 
+    t.player("\"Then she needs someone who isn't frightened at her back. You've walked the Chetwood in the dark "
+             "for twenty years. That's who I want.\"")
+    t.roll("Edwy", "Persuade", rating=1, tn=15, stakes="win Gytha round", feat=[9], success=[6])
+    t.council_update(used=1, add=2, attitude="listening", log="The Chetwood in the dark: she half smiles.")
+    t.tell(
+        "That gets the ghost of a smile. \"Twenty-two years,\" she says. \"And the Chetwood has a sky over it.\" "
+        "But she has let go of the strap, and she is looking at Bryni now, not at the door.\n\n"
+        "> OOC:\n> - **Persuade:** great success (TN 15, total 15, one {success}). She's listening.\n\n"
+        "What does Edwy do?")
+    t.end_turn()
+    t.mark("council")
+
+    t.player("I ask Bryni to tell her one true thing about the debt. Just one.")
+    t.roll("Edwy", "Persuade (1d from Bryni)", rating=2, tn=15, stakes="win Gytha round", feat=[10], success=[6, 6])
+    t.council_update(used=2, add=4, attitude="won over", log="Bryni tells her one true thing about the debt.")
+    t.council_end("Gytha will come under the mountain.")
+    t.tell(
+        "Bryni looks at you a long moment. Then she leans across the table and says something to Gytha so low "
+        "that you only catch the word *grandfather*.\n\n"
+        "Gytha closes her eyes. When she opens them she reaches for the pack by the door, unbuckles it, and starts "
+        "sorting her herbs.\n\n"
+        "> OOC:\n> - **Persuade:** extraordinary success. **Gytha comes.** The council counts as a Fellowship "
+        "milestone.\n> - **A new thread:** Bryni's errand.\n\nThe road east is long. Where do you begin?")
+    t.end_turn()
+
+
+def hall(t):
+    """Under the mountain: the Twenty-first Hall, an oracle question, and a roll waiting in the tray."""
     t.player("We go by the Redhorn road and come in by the West-gate, as Bryni says. Three days in the dark, then "
              "the hall.")
     t.place(COMPANY, "Doors of Durin", day=23)
@@ -355,16 +406,22 @@ def journey(t):
     t.end_turn()
 
 
-CHAPTERS = [pony, hall, gate, journey]
+CHAPTERS = [pony, gytha, hall, gate, journey]
 
 # name: upto (the last chapter played), at (stop at that chapter's t.mark), view (scene or map), steps (JavaScript
 # run in the page before the shot, in order), size (the window, default 1920x1200).
 SHOTS = {
     "inn": dict(upto="pony", at="inn",
-                caption="Roleplay at the inn: the painted scene, the tale and an Insight roll"),
+                # up to the sketch without tucking the stage away, as scrolling by hand would
+                steps=["ignoreScrollUntil = performance.now() + 5000; "
+                       "logEl.scrollTop += document.querySelector('figure.sketch').getBoundingClientRect().top "
+                       "- logEl.getBoundingClientRect().top - 20"],
+                caption="Roleplay at the inn: the painted scene, the tale, and a sketch of the hall Bryni tells of"),
     "paths": dict(upto="pony", caption="Paths: a few ways forward as cards, or anything else you type"),
     "view": dict(upto="hall", at="view", steps=["document.getElementById('stage').click()"],
                  caption="Taking in the view: click the painting to see all of it"),
+    "council": dict(upto="gytha", at="council",
+                    caption="Councils: the Council panel shows how far they are swayed and the exchanges left"),
     "roll": dict(upto="hall", caption="Under the mountain: the dice tray shows the odds with and without Hope"),
     "battle": dict(upto="gate", caption="A Band battle at the Gate: the Fight panel shows what the hero can see"),
     "journey": dict(upto="journey", steps=["document.getElementById('log').scrollBy(0, -170)"],

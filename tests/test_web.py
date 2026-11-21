@@ -70,6 +70,9 @@ def test_bookkeeping_asides_are_not_story():
     assert is_aside("Still sorting the journey's chance meeting; the story follows.", "note_new")
     assert is_aside("Still sorting the journey's chance meeting; the story follows.", None)
     assert not is_aside("Still the rain comes on, and the story of the road follows the river.", None)
+    assert not is_aside("Looking up, Tomas sees a shadow cross the moon. What does he do?", "request_roll")
+    assert not is_aside("Opening the door, you find the hall empty.", None)
+    assert is_aside("Checking the sheet, then the threads.", "Read")
 
 
 def _run_turn(blocks):
@@ -90,6 +93,8 @@ def _run_turn(blocks):
     async def go():
         for b in blocks:
             await e._handle(AssistantMessage(content=[b], model="m"))
+            if getattr(b, "name", "").endswith("request_roll"):
+                e.turn["story_since_roll"] = False      # what the tool does once the dice are cast
         await e._flush()
     asyncio.run(go())
     return [ev for ev in e.hub.events if ev["t"] == "narration"]
@@ -237,7 +242,11 @@ def test_mechanics_drifting_into_the_story_move_to_the_ooc_box():
     assert tidy_story(story) == (story, False)
 
 
-def test_a_mechanics_only_outcome_is_retold_as_story_above_the_summary():
+@pytest.mark.parametrize("summary", [
+    "The INSIGHT roll came to 14 against TN 16, a failure.\n\nWhat does Tomas do?",
+    "> OOC:\n> - **Insight** 22 vs TN 16, success: you read him.\n\nWhat does Tomas do?",   # an OOC note alone
+])
+def test_a_mechanics_only_outcome_is_retold_as_story_above_the_summary(summary):
     from claude_agent_sdk import AssistantMessage, ResultMessage
     from claude_agent_sdk.types import TextBlock, ToolUseBlock
 
@@ -245,7 +254,6 @@ def test_a_mechanics_only_outcome_is_retold_as_story_above_the_summary():
         return ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False,
                              num_turns=1, session_id="")
 
-    summary = "The INSIGHT roll came to 14 against TN 16, a failure.\n\nWhat does Tomas do?"
     story = 'Harrow only smiles. "You read nothing in me, Bree-lander."'
 
     class Hub:
@@ -281,6 +289,7 @@ def test_a_mechanics_only_outcome_is_retold_as_story_above_the_summary():
     e.hub, e._held, e._stopping, e.turn = Hub(), None, False, {}
     e.client, e.queue = Client(e.turn), asyncio.Queue()
     e._save_session = lambda sid: None
+    e._reconnect = False
 
     async def go():
         await e.queue.put("Let's read him.")
@@ -363,6 +372,23 @@ def test_chronicle_renders_scenes_images_rolls_and_skips_asides():
     assert "[!success] Tomas: Courtesy, TN 14: Success (great), total 18" in md and "ᚷ Rune" in md
     assert "![[90 Assets/portraits/nob.png|220]]\n*Nob*" in md
     assert md.count("bree.png") == 1
+
+
+def test_a_session_picked_up_after_a_break_stays_one_session():
+    from ringwraith import chronicle
+    ev = [
+        {"t": "player", "text": "/session-start"},             # before marks existed: split as before
+        {"t": "narration", "text": "Session 4."},
+        {"t": "player", "text": "/session-start"},
+        {"t": "session_mark", "note": "Session 005.md"},
+        {"t": "narration", "text": "Session 5 begins."},
+        {"t": "player", "text": "/session-start"},             # after a reboot: no new note, same session
+        {"t": "narration", "text": "Session 5 goes on."},
+        {"t": "player", "text": "/session-start"},
+        {"t": "session_mark", "note": "Session 006.md"},
+        {"t": "narration", "text": "Session 6."},
+    ]
+    assert chronicle.sessions(ev) == [(0, 2), (2, 7), (7, 10)]
 
 
 def test_chronicle_section_is_replaced_not_duplicated(tmp_path):
@@ -498,7 +524,8 @@ def test_only_cli_commands_with_a_table_tool_are_blocked(tmp_path, monkeypatch):
     assert "Bash(.venv/Scripts/ringwraith map move *)" in pats and "Bash(.venv/Scripts/ringwraith map *)" not in pats
 
 
-def test_the_system_prompt_is_the_contract_and_the_rules_card(tmp_path):
+def test_the_system_prompt_is_the_contract_and_the_rules_card(tmp_path, monkeypatch):
+    monkeypatch.setattr(eng, "looks_section", lambda: "")     # not the active campaign's painting looks
     (tmp_path / "lore").mkdir()
     (tmp_path / "lore" / "core.md").write_text("# Rules card\nTN = something", encoding="utf-8")
     text = eng.system_prompt(tmp_path)
@@ -540,8 +567,174 @@ def test_the_system_prompt_goes_by_file_so_the_command_line_stays_short(tmp_path
     e = eng.Engine.__new__(eng.Engine)
     e.repo, e.server, e.tool_names = eng.Path(__file__).parents[1], None, []
     opts = e._options(None)
-    assert "append" not in opts.system_prompt
+    assert opts.system_prompt is None and opts.extra_args["system-prompt-file"].endswith("table-prompt.md")
     assert (tmp_path / "table-prompt.md").read_text(encoding="utf-8").startswith("# Ringwraith, the Loremaster")
     t = SubprocessCLITransport(prompt="x", options=opts)
     t._cli_path = "claude.exe"
-    assert len(" ".join(t._build_command())) < 20000            # Windows refuses command lines over 32,767 chars
+    cmd = t._build_command()
+    assert len(" ".join(cmd)) < 20000                          # Windows refuses command lines over 32,767 chars
+    assert "--system-prompt-file" in cmd
+
+
+def test_fight_tool_opens_the_panel(monkeypatch, tmp_path):
+    """Through the tool as the table calls it, so a broken helper (a missing import) shows up here."""
+    import claude_agent_sdk
+    from ringwraith.web import fight as fg, gametools
+
+    tools = {}
+    real = claude_agent_sdk.create_sdk_mcp_server
+    def grab(name, version, tools_list):
+        tools.update({t.name: t for t in tools_list})
+        return real(name=name, version=version, tools=tools_list)
+    monkeypatch.setattr(gametools, "create_sdk_mcp_server",
+                        lambda name, version, tools: grab(name, version, tools))
+    monkeypatch.setattr(fg.cp, "private_dir", lambda *a, **k: tmp_path)
+
+    class Hub:
+        def __init__(self):
+            self.events = []
+
+        async def emit(self, e):
+            self.events.append(e)
+
+    hub = Hub()
+    gametools.build(hub, {"story_since_roll": False})
+    r = asyncio.run(tools["fight"].handler({"action": "start", "kind": "battle", "title": "At the ford",
+                                            "foes": [{"name": "Riders", "count": 6, "endurance": 8, "hate": 2}],
+                                            "battle": {"resistance": 6, "might": 1}}))
+    assert not r.get("is_error"), r
+    assert hub.events[-1]["t"] == "fight" and hub.events[-1]["fight"]["foes"][0]["name"] == "Riders"
+
+
+def test_council_tool_opens_the_panel(monkeypatch, tmp_path):
+    import claude_agent_sdk
+    from ringwraith.web import council as cn, gametools
+
+    tools = {}
+    real = claude_agent_sdk.create_sdk_mcp_server
+    def grab(name, version, tools_list):
+        tools.update({t.name: t for t in tools_list})
+        return real(name=name, version=version, tools=tools_list)
+    monkeypatch.setattr(gametools, "create_sdk_mcp_server",
+                        lambda name, version, tools: grab(name, version, tools))
+    monkeypatch.setattr(cn.cp, "private_dir", lambda *a, **k: tmp_path)
+
+    class Hub:
+        def __init__(self):
+            self.events = []
+
+        async def emit(self, e):
+            self.events.append(e)
+
+    hub = Hub()
+    gametools.build(hub, {"story_since_roll": False})
+    r = asyncio.run(tools["council"].handler({"action": "start", "title": "The moot", "who": ["Mungo"],
+                                              "request": "Act now", "resistance": 6}))
+    assert not r.get("is_error"), r
+    assert hub.events[-1]["t"] == "council" and hub.events[-1]["council"]["who"][0]["name"] == "Mungo"
+    asyncio.run(tools["council"].handler({"action": "end", "outcome": "Agreed"}))
+    assert hub.events[-2] == {"t": "council", "council": None} and hub.events[-1]["t"] == "council_end"
+
+
+def test_fellowship_tool_opens_the_panel_and_picks_up_a_phase(monkeypatch, tmp_path):
+    import claude_agent_sdk
+    from ringwraith.web import fellowship as fs, gametools
+
+    tools = {}
+    real = claude_agent_sdk.create_sdk_mcp_server
+    def grab(name, version, tools_list):
+        tools.update({t.name: t for t in tools_list})
+        return real(name=name, version=version, tools=tools_list)
+    monkeypatch.setattr(gametools, "create_sdk_mcp_server",
+                        lambda name, version, tools: grab(name, version, tools))
+    monkeypatch.setattr(fs.cp, "private_dir", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(fs, "_band", lambda: True)
+    monkeypatch.setattr(gametools, "_hero_xp", lambda: {"skill": 4, "adventure": 2})
+
+    class Hub:
+        def __init__(self):
+            self.events = []
+
+        async def emit(self, e):
+            self.events.append(e)
+
+    hub = Hub()
+    gametools.build(hub, {"story_since_roll": False})
+    run = lambda a: asyncio.run(tools["fellowship"].handler(a))
+    assert "no Fellowship Phase" in run({"action": "show"})["content"][0]["text"]
+    r = run({"action": "start", "duration": "brief", "place": "Bree", "undertakings": 1})
+    assert not r.get("is_error"), r
+    panel = hub.events[-1]["fellowship"]
+    assert hub.events[-1]["t"] == "fellowship" and panel["xp"] == {"skill": 4, "adventure": 2}
+    run({"action": "update", "done": "recovery"})
+    assert "next: updates" in run({"action": "show"})["content"][0]["text"]
+    assert run({"action": "update", "done": "dancing"}).get("is_error")
+    run({"action": "end", "outcome": "Spring passes"})
+    assert hub.events[-2] == {"t": "fellowship", "fellowship": None}
+    assert hub.events[-1]["t"] == "fellowship_end" and hub.events[-1]["place"] == "Bree"
+
+
+def test_whatever_is_under_way_survives_a_break(monkeypatch, tmp_path):
+    """A fight, council or phase left open: the page shows it from the saved state, and the Loremaster is told."""
+    import claude_agent_sdk
+    from ringwraith.web import council as cn, fellowship as fs, fight as fg, gametools, journey as jr, views
+
+    for mod in (cn, fs, fg, jr):
+        monkeypatch.setattr(mod.cp, "private_dir", lambda *a, **k: tmp_path)
+    cn.start("The moot", ["Mungo"], "Act now", 6)
+    fs.start("brief", "Bree", 1, band=False)
+    assert views.open_procedures() == ["council 'The moot'", "fellowship 'Bree'"]
+    panels = views._panels({"skill": 1, "adventure": 2})
+    assert panels["council"]["title"] == "The moot" and panels["fight"] is None
+    assert panels["fellowship"]["xp"] == {"skill": 1, "adventure": 2}
+
+    tools = {}
+    real = claude_agent_sdk.create_sdk_mcp_server
+    def grab(name, version, tools_list):
+        tools.update({t.name: t for t in tools_list})
+        return real(name=name, version=version, tools=tools_list)
+    monkeypatch.setattr(gametools, "create_sdk_mcp_server",
+                        lambda name, version, tools: grab(name, version, tools))
+
+    class Hub:
+        def __init__(self):
+            self.events = []
+
+        async def emit(self, e):
+            self.events.append(e)
+
+    hub = Hub()
+    gametools.build(hub, {"story_since_roll": False})
+    text = lambda r: r["content"][0]["text"]
+    assert "successes 0/6" in text(asyncio.run(tools["council"].handler({"action": "show"})))
+    assert hub.events[-1]["t"] == "council"
+    assert "no fight" in text(asyncio.run(tools["fight"].handler({"action": "show"})))
+    assert "no journey" in text(asyncio.run(tools["journey"].handler({"action": "show"})))
+
+
+def test_begin_session_starts_afresh_only_after_a_session_was_ended(monkeypatch, tmp_path):
+    from ringwraith import clock, vault
+    from ringwraith.web import engine
+
+    note = tmp_path / "Session 004.md"
+    monkeypatch.setattr(vault, "session_note", lambda n, *a, **k: tmp_path / f"Session {n:03d}.md")
+    monkeypatch.setattr(clock, "state", lambda: (None, {"session": 4}, ""))
+    assert not engine.last_session_ended()                      # no note: keep the conversation
+    note.write_text("---\ntype: session\ntale_days: ''\n---\n", encoding="utf-8")
+    assert not engine.last_session_ended()                      # never ended: picked up after a break
+    note.write_text("---\ntype: session\ntale_days: 12-14\n---\n", encoding="utf-8")
+    assert engine.last_session_ended()
+    monkeypatch.setattr(clock, "state", lambda: (None, {}, ""))
+    assert not engine.last_session_ended()                      # a new campaign keeps its session zero
+
+
+def test_parts_of_the_contract_come_only_with_their_setting(monkeypatch):
+    text = eng.PROMPT_FILE.read_text(encoding="utf-8")
+    off, on = eng.apply_conditions(text, set()), eng.apply_conditions(text, {"oracle-player", "cutaways", "easy", "paths-off"})
+    assert "<!--" not in off and "<!--" not in on and len(off) < len(on)
+    assert "CUTAWAY:" in on and "CUTAWAY:" not in off
+    assert "oracle_reading" in on and "Path cards are off" in on and "Easy mode is on" in on
+    monkeypatch.setattr(eng.cp, "load_settings", lambda *a, **k: {"play": {"oracle": "player", "paths": False},
+                                                                  "difficulty": {"easy": False}})
+    monkeypatch.setattr(eng.cp, "campaign_dir", lambda *a, **k: eng.Path("nowhere"))
+    assert eng.prompt_conditions() == {"oracle-player", "paths-off"}

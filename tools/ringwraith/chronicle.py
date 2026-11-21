@@ -7,7 +7,9 @@ Built straight from `.ringwraith/table-log.jsonl`, so nothing is retold or lost:
 - portraits and other images where they first appeared;
 - rolls and oracle answers as Obsidian callouts.
 
-A play session starts at a player message `/session-start` (or the start of the log).
+A play session starts at a player message `/session-start` (or the start of the log). Once the log has session
+marks (the table logs one when a new session note is made), a `/session-start` that made no new note was a
+session picked up again after a break (a reboot, a closed tab), and it stays part of the session before it.
 """
 
 from __future__ import annotations
@@ -42,6 +44,10 @@ def sessions(events: list[dict]) -> list[tuple[int, int]]:
     """(start, end) index ranges of the play sessions in the log."""
     starts = [i for i, e in enumerate(events)
               if e.get("t") == "player" and e.get("text", "").strip().startswith("/session-start")]
+    marks = [i for i, e in enumerate(events) if e.get("t") == "session_mark"]
+    if marks:                 # keep the starts that opened a new session note (and those from before marks existed)
+        ends = starts[1:] + [len(events)]
+        starts = [s for s, nxt in zip(starts, ends) if s < marks[0] or any(s < m < nxt for m in marks)]
     if not starts or starts[0] != 0:
         starts = [0] + starts
     return [(s, (starts[k + 1] if k + 1 < len(starts) else len(events))) for k, s in enumerate(starts)]

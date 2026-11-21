@@ -171,6 +171,20 @@ def build(spec: dict) -> dict:
     return g
 
 
+def _follow_new_frame(region_id: str, old: dict, new: dict, slug=None, root=None) -> None:
+    """Campaign places and routes on a region are stored in its pixels: carry them from the old frame and scale
+    to the new one, through the region's own miles."""
+    from .geo import store
+    from .geo.common import REGION_MARGIN as M
+    (ox, oy, *_), op = old["bounds"], old["px_per_mile"]
+    (nx, ny, *_), np_ = new["bounds"], new["px_per_mile"]
+
+    def convert(p):
+        miles = ((p[0] - M) / op + ox, (p[1] - M) / op + oy)
+        return [(miles[0] - nx) * np_ + M, (miles[1] - ny) * np_ + M]
+    store.remap_points(region_id, convert, slug=slug, root=root)
+
+
 def save(g: dict, slug=None, root=None) -> Path:
     f = _dir(slug, root) / f"{g['id']}.yaml"
     fileio.atomic_write(f, yaml.safe_dump(g, sort_keys=False, allow_unicode=True))
@@ -190,7 +204,11 @@ def create(spec: dict, slug=None, root=None) -> dict:
             raise RegionError(f"the anchor {anchor!r} must be a place on {parent['title']}; add it there first")
     elif not any(pl["name"] == anchor for pl in g["places"]):
         raise RegionError(f"a land map's anchor {anchor!r} must be one of its places (at [0, 0])")
+    old = load(g["id"], slug, root) if exists(g["id"], slug, root) else None
     save(g, slug, root)
+    if (old and old.get("bounds") and old.get("px_per_mile")      # an unbuilt spec has no frame to carry from
+            and (old["bounds"], old["px_per_mile"]) != (g["bounds"], g["px_per_mile"])):
+        _follow_new_frame(g["id"], old, g, slug, root)
     out = cp.campaign_dir(slug, root) / "90 Assets" / "maps" / f"{g['id']}.jpg"
     mapdraw.render_geo(g, out)
     return g

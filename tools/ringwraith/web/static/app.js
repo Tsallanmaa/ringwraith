@@ -51,6 +51,13 @@ if (!window.marked || !window.DOMPurify || !window.L) {      // say so, rather t
 DOMPurify.addHook("afterSanitizeAttributes", (n) => {
   if (n.tagName === "A" && n.getAttribute("href")) { n.setAttribute("target", "_blank"); n.setAttribute("rel", "noopener"); }
 });
+// Model and vault text may only use what Markdown makes, plus the icon spans: no style, id, forms or images that
+// could cover the controls, post somewhere, or capture the page's own element lookups.
+const SAFE = {
+  ALLOWED_TAGS: ["p", "br", "hr", "em", "strong", "del", "a", "ul", "ol", "li", "blockquote", "code", "pre",
+                 "h1", "h2", "h3", "h4", "table", "thead", "tbody", "tr", "th", "td", "span", "sup", "sub"],
+  ALLOWED_ATTR: ["href", "title", "class"],
+};
 marked.setOptions({ breaks: true });   // a single line break is a line break (OOC notes are written line by line)
 const ICONS = {
   "{success}": '<span class="glyph succ" title="success icon">✦</span>',
@@ -60,7 +67,7 @@ const ICONS = {
 const iconize = (escaped) => escaped.replace(/\{(success|eye|gandalf)\}/g, (m) => ICONS[m]);
 function md(text) {
   const withIcons = String(text || "").replace(/\{(success|eye|gandalf)\}/g, (m) => ICONS[m]);
-  const html = DOMPurify.sanitize(marked.parse(withIcons), { FORBID_TAGS: ["style", "img"] });
+  const html = DOMPurify.sanitize(marked.parse(withIcons), SAFE);
   const box = el("div", null, html);
   for (const bq of box.querySelectorAll("blockquote")) {
     const first = bq.querySelector("p") || bq;
@@ -81,7 +88,7 @@ let tucked = false, lastTop = 0, ignoreScrollUntil = 0;
 function dockLabel() {
   if (trays.size) {
     const t = [...trays.values()].pop();
-    return "Roll waiting · " + (t.querySelector(".title")?.textContent || "");
+    return (t.classList.contains("reading") ? "Reading waiting · " : "Roll waiting · ") + (t.querySelector(".title")?.textContent || "");
   }
   const n = document.querySelectorAll("#paths .path:not(.else)").length;
   return n ? `${n} Paths` : "Show choices";
@@ -112,8 +119,9 @@ logEl.addEventListener("wheel", (ev) => { if (ev.deltaY > 0 && tucked && atBotto
 $("#dock-handle").onclick = () => setTucked(false);
 
 function scrollDown(force) {
+  if (replaying) return;            // the replay scrolls once at its end: each scroll here forces a layout
   const near = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 240;
-  if (force || near || replaying) logEl.scrollTop = logEl.scrollHeight;
+  if (force || near) logEl.scrollTop = logEl.scrollHeight;
 }
 function add(node) { logEl.appendChild(node); scrollDown(); return node; }
 const online = () => !!ws && ws.readyState === 1;
@@ -204,6 +212,7 @@ function narrFinal(text, aside, recap, summary) {
   if (!n) { n = add(el("div", "narr" + (nextOpening ? " opening" : ""))); nextOpening = false; }
   n.classList.remove("live");
   n.innerHTML = md(text);
+  if (!replaying) announce(n.textContent);
   if (summary) untoldSummary = n;
   scrollDown();
 }
@@ -261,6 +270,7 @@ function rollCard(e, req) {
     det.addEventListener("click", (ev) => ev.stopPropagation());   // let the player select text in it
     c.appendChild(det);
     c.addEventListener("click", () => c.classList.toggle("open"));
+    keyClickable(c);
   } else if (e.notes && e.notes.length) c.title = e.notes.join("; ");
   return c;
 }
@@ -338,6 +348,32 @@ function rollTray(e) {
   t.appendChild(foot);
   return t;
 }
+let askingAboutReading = false;   // the next words are a question to Ringwraith, not the player's reading
+function readingTray(e) {
+  askingAboutReading = false;
+  const t = el("div", "tray reading");
+  t.innerHTML = `
+    <div class="tray-head"><span class="title">Oracle — ${iconize(esc(e.question))}</span></div>
+    <div class="stakes">${iconize(esc(e.result))}</div>
+    <div class="suggestion"><span class="label">Ringwraith suggests</span> ${iconize(esc(e.suggestion))}</div>`;
+  const foot = el("div", "tray-foot");
+  const ok = el("button", null, "Accept this reading");
+  ok.type = "button";
+  ok.onclick = () => answerRoll(e.id, "accept");
+  const hint = el("span", "hint", "or type below: your words become the reading");
+  const ask = el("button", "linkish", "Ask Ringwraith first");
+  ask.type = "button";
+  ask.onclick = () => {
+    askingAboutReading = !askingAboutReading;
+    ask.textContent = askingAboutReading ? "Give my own reading instead" : "Ask Ringwraith first";
+    hint.textContent = askingAboutReading ? "or type your question below" : "or type below: your words become the reading";
+    updateActivity();
+    input.focus();
+  };
+  foot.append(ok, hint, ask);
+  t.appendChild(foot);
+  return t;
+}
 function answerRoll(id, action, extra = {}) {
   const t = trays.get(id);
   if (t) t.querySelectorAll("button").forEach((b) => (b.disabled = true));
@@ -391,7 +427,32 @@ document.addEventListener("toggle", (ev) => {
   const id = ev.target.id;
   if (id && ev.target.closest("#side, #drawer")) { try { localStorage.setItem("rw.open." + id, ev.target.open ? "1" : "0"); } catch {} }
 }, true);
-const inline = (t) => DOMPurify.sanitize(marked.parseInline(String(t || "").replace(/\{(success|eye|gandalf)\}/g, (m) => ICONS[m])));
+const inline = (t) => DOMPurify.sanitize(marked.parseInline(String(t || "").replace(/\{(success|eye|gandalf)\}/g, (m) => ICONS[m])), SAFE);
+// What each number on the sheets does, in a line, for the hover tooltips.
+const TIP = {
+  parry: "The TN of every attack made against you. It comes from Wits and your culture, plus a shield.",
+  endurance: "Staying power in a fight. Blows lower it; at 0 you fall unconscious. At or below your Load plus Fatigue (the mark on the bar) you are Weary.",
+  hope: "Spend a point before a roll for an extra Success die (two when Inspired). It comes back with rest among friends and in the Fellowship Phase. If Shadow reaches your current Hope, you are Miserable.",
+  shadow: "Darkness taken in: dread, greed, misdeeds, sorcery. At or above your current Hope you are Miserable. If it fills all your Hope, every roll is Ill-favoured until a bout of madness clears it and leaves a lasting flaw. Scars are Shadow that never leaves.",
+  fellowship: "The ties that hold you up: while resting, spend points from it to regain Hope. The pool fills again after moments of true fellowship.",
+  weary: "Endurance at or below Load plus Fatigue: 1, 2 and 3 on the Success dice count as nothing.",
+  miserable: "Shadow at or above current Hope: an Eye on the Feat die fails the roll outright.",
+  wounded: "A wound that takes hours or days to heal and slows your recovery while resting. A second wound before then leaves you dying.",
+  load: "War gear and treasure; travelling gear doesn't count. Endurance at or below Load plus Fatigue makes you Weary.",
+  fatigue: "The toll of the road. It counts as extra Load and wears off with rest in a safe refuge.",
+  strength: "TN for the skills of body and force. It also sets your Endurance.",
+  heart: "TN for the skills of spirit and fellowship. It also sets your Hope.",
+  wits: "TN for the skills of mind and wariness. It also sets your Parry.",
+  xp: "Skill points buy Skill ranks; Adventure points buy Combat Proficiencies and Valour or Wisdom. Spent in the Fellowship Phase.",
+  eye: "How much the Enemy has noticed you. An Eye on the Feat die outside combat, gaining Shadow and open magic raise it. At the Hunt threshold you are found out: something comes for you, and the count starts over.",
+  readiness: "How ready the Band is: every Band and Ally roll is made against the TN beside it. Hardened Allies raise it.",
+  expertise: "The Band's learning: crafts, first aid, hunting, lore.",
+  manoeuvre: "The Band's movement: hard paths, keeping pace, sneaking past foes, fleeing.",
+  rally: "The Band's heart: enduring harm and weariness, standing fast, holding together.",
+  vigilance: "The Band's watchfulness: spotting threats, keeping watch, searching.",
+  war: "The Band's fighting strength, tactics and gear. Rolled in battles.",
+};
+const tipAttr = (k) => (TIP[k] ? ` class="tip" title="${esc(TIP[k])}"` : "");
 // − / + buttons that change the hero sheet (the server writes the note and tells Ringwraith)
 const stepper = (key) => `<span class="step"><button type="button" data-adj="${key}" data-d="-1" title="One less">−</button><button type="button" data-adj="${key}" data-d="1" title="One more">+</button></span>`;
 function clockSummary(deadlines, day, counters) {
@@ -401,8 +462,20 @@ function clockSummary(deadlines, day, counters) {
     : left === 0 ? "today" : "overdue";
   return `${deadlines.length} · next ${when}`;
 }
+// A procedure panel, redrawn only when what it shows has changed (a redraw would reset its scroll).
+const PANELS = { fight: (v) => renderFight(v), council: (v) => renderCouncil(v), journey: (v) => renderJourney(v),
+  fellowship: (v) => renderFellowship(v) };
+const panelShown = {};
+function showPanel(key, v) {
+  const j = JSON.stringify(v ?? null);
+  if (panelShown[key] === j) return;
+  panelShown[key] = j;
+  PANELS[key](v ?? null);
+}
 function renderSheet(s) {
   if (!s) return;
+  // The saved state is the truth, whatever the event log still holds.
+  for (const [k, v] of Object.entries(s.panels || {})) showPanel(k, v);
   const camp = s.campaign || {};
   $("#campaign").textContent = [camp.name, s.state?.date, s.state?.day ? `day ${s.state.day}` : "", s.state?.location]
     .filter(Boolean).join(" · ");
@@ -421,26 +494,26 @@ function renderSheet(s) {
     const fav = new Set(h.favoured_skills || []);
     const skills = Object.values(h.skills || {}).flatMap((g) => Object.entries(g));
     hp.innerHTML = `
-      <h2>The Hero <small>Parry ${esc(h.parry ?? "–")}</small></h2>
+      <h2>The Hero <small><span${tipAttr("parry")}>Parry ${esc(h.parry ?? "–")}</span>${h.xp ? ` · <span class="xp tip" title="${esc(TIP.xp)}">SP ${esc(h.xp.skill ?? 0)} · AP ${esc(h.xp.adventure ?? 0)}</span>` : ""}</small></h2>
       <div class="hero-name">${esc(h.name)}</div>
       <div class="hero-sub">${esc(h.culture || "")}</div>
-      <div class="stat"><div class="row"><b>ENDURANCE</b>${stepper("endurance")}<span>${esc(h.endurance?.current ?? "–")} / ${esc(h.endurance?.max ?? "–")}</span></div>
+      <div class="stat"><div class="row"><b${tipAttr("endurance")}>ENDURANCE</b>${stepper("endurance")}<span>${esc(h.endurance?.current ?? "–")} / ${esc(h.endurance?.max ?? "–")}</span></div>
         ${meter("endurance", h.endurance?.current, h.endurance?.max, load)}</div>
-      <div class="stat"><div class="row"><b>HOPE</b>${stepper("hope")}<span>${esc(hopeCur)} / ${esc(hopeMax)}</span></div>${meter("hope", hopeCur, hopeMax)}</div>
-      <div class="stat"><div class="row"><b>SHADOW</b>${stepper("shadow")}<span>${esc(h.shadow?.points ?? 0)}${h.shadow?.scars ? ` + ${esc(h.shadow.scars)} scar${h.shadow.scars > 1 ? "s" : ""}` : ""}</span></div>
+      <div class="stat"><div class="row"><b${tipAttr("hope")}>HOPE</b>${stepper("hope")}<span>${esc(hopeCur)} / ${esc(hopeMax)}</span></div>${meter("hope", hopeCur, hopeMax)}</div>
+      <div class="stat"><div class="row"><b${tipAttr("shadow")}>SHADOW</b>${stepper("shadow")}<span>${esc(h.shadow?.points ?? 0)}${h.shadow?.scars ? ` + ${esc(h.shadow.scars)} scar${h.shadow.scars > 1 ? "s" : ""}` : ""}</span></div>
         ${meter("shadow", shadow, hopeMax)}</div>
-      ${h.fellowship ? `<div class="stat"><div class="row"><b>FELLOWSHIP</b>${stepper("fellowship")}<span>${esc(h.fellowship.current ?? 0)} / ${esc(h.fellowship.rating ?? 0)}</span></div>
+      ${h.fellowship ? `<div class="stat"><div class="row"><b${tipAttr("fellowship")}>FELLOWSHIP</b>${stepper("fellowship")}<span>${esc(h.fellowship.current ?? 0)} / ${esc(h.fellowship.rating ?? 0)}</span></div>
         ${meter("fellowship", h.fellowship.current ?? 0, h.fellowship.rating ?? 0)}</div>` : ""}
       <div class="badges">
-        ${weary ? '<span class="badge bad">Weary</span>' : ""}
-        ${miserable ? '<span class="badge bad">Miserable</span>' : ""}
-        <button type="button" class="badge toggle ${c.wounded ? "bad" : "off"}" data-adj="wounded" title="${c.wounded ? "Click if the hero is no longer Wounded" : "Click to mark the hero Wounded"}">Wounded</button>
+        ${weary ? `<span class="badge bad tip" title="${esc(TIP.weary)}">Weary</span>` : ""}
+        ${miserable ? `<span class="badge bad tip" title="${esc(TIP.miserable)}">Miserable</span>` : ""}
+        <button type="button" class="badge toggle ${c.wounded ? "bad" : "off"}" data-adj="wounded" title="${esc(TIP.wounded)} ${c.wounded ? "Click if the hero is no longer Wounded." : "Click to mark the hero Wounded."}">Wounded</button>
         ${!weary && !miserable && !c.wounded ? '<span class="badge ok">Hale</span>' : ""}
-        <span class="badge">Load ${esc(h.load ?? 0)}</span>
-        <span class="badge fat">Fatigue ${esc(h.fatigue ?? 0)}${stepper("fatigue")}</span>
+        <span class="badge tip" title="${esc(TIP.load)}">Load ${esc(h.load ?? 0)}</span>
+        <span class="badge fat tip" title="${esc(TIP.fatigue)}">Fatigue ${esc(h.fatigue ?? 0)}${stepper("fatigue")}</span>
       </div>
       <div class="attrs">${["strength", "heart", "wits"].map((a) =>
-        `<div class="attr"><b>${a.toUpperCase()}</b><span>${esc(attrs[a] ?? "–")}</span> <i>TN ${attrs[a] != null ? tnBase - attrs[a] : "–"}</i></div>`).join("")}</div>
+        `<div class="attr"><b${tipAttr(a)}>${a.toUpperCase()}</b><span>${esc(attrs[a] ?? "–")}</span> <i>TN ${attrs[a] != null ? tnBase - attrs[a] : "–"}</i></div>`).join("")}</div>
       ${traitsRow(h.traits)}
       ${traitsFold(h.traits)}
       <details><summary>Skills & proficiencies</summary>
@@ -469,7 +542,7 @@ function renderSheet(s) {
     ${dlRows || ctRows ? `<details class="clocks" id="clocks"${openAttr("clocks", true)}>
       <summary><span>Deadlines</span><em>${esc(clockSummary(deadlines, day, (st.counters || []).length))}</em></summary>
       ${dlRows}${ctRows}</details>` : ""}
-    <div class="stat"><div class="row"><b>EYE AWARENESS</b><span>${esc(st.eye_awareness ?? 0)} / ${esc(st.hunt_threshold ?? "–")}</span></div>
+    <div class="stat"><div class="row"><b${tipAttr("eye")}>EYE AWARENESS</b><span>${esc(st.eye_awareness ?? 0)} / ${esc(st.hunt_threshold ?? "–")}</span></div>
       ${meter("eye", st.eye_awareness ?? 0, st.hunt_threshold || 18)}</div>` : "";
 
   const b = s.band;
@@ -477,9 +550,9 @@ function renderSheet(s) {
   if (b || (s.allies || []).length) {
     const d = b?.dispositions || {};
     bp.innerHTML = `
-      <h2>The Band ${b ? `<small>Readiness ${esc(b.readiness)} · TN ${(s.tn_base || 20) - (b.readiness || 0)}</small>` : ""}</h2>
+      <h2>The Band ${b ? `<small${tipAttr("readiness")}>Readiness ${esc(b.readiness)} · TN ${(s.tn_base || 20) - (b.readiness || 0)}</small>` : ""}</h2>
       ${b ? `<div class="disps">${["expertise", "manoeuvre", "rally", "vigilance", "war"].map((k) =>
-        `<div><b>${k.toUpperCase()}</b>${esc(d[k] ?? "–")}</div>`).join("")}</div>` : ""}
+        `<div${tipAttr(k)}><b>${k.toUpperCase()}</b>${esc(d[k] ?? "–")}</div>`).join("")}</div>` : ""}
       ${(s.allies || []).map((a) => {
         const img = a.image ? String(a.image).replace(/^\[\[|\]\]$/g, "").replace(/^90 Assets\//, "/assets/") : "";
         const bad = [a.injury && a.injury !== "none" ? a.injury : "", a.fatigue && a.fatigue !== "none" ? a.fatigue : "",
@@ -584,6 +657,14 @@ document.addEventListener("pointerdown", (ev) => {   // a click elsewhere on the
 });
 
 // ------------------------------------------------------------------ the Fight panel
+// An advantage or complication: its name, what it gives (+1d), whether it lasts the battle, and a line of story
+// as the tooltip. (Plain text comes from fights saved before effects were kept.)
+function ftag(t, cls) {
+  const e = typeof t === "string" ? { name: t } : t;
+  const tip = [e.text, e.persistent ? "Lasts the whole battle." : ""].filter(Boolean).join(" ");
+  return `<span class="ftag ${cls}"${tip ? ` title="${esc(tip)}"` : ""}>${iconize(esc(e.name))}` +
+    `${e.effect ? ` <b class="feff">${esc(e.effect)}</b>` : ""}${e.persistent ? ` <i class="fpers">persistent</i>` : ""}</span>`;
+}
 // What the hero can see of a fight: each foe's state as a bar and a word, the numbers the hero has come to
 // know, the Fell Abilities it has shown; for a battle, how the war party holds and what helps or hinders.
 function renderFight(f) {
@@ -600,9 +681,11 @@ function renderFight(f) {
   const battle = b ? `<div class="fbattle">
       <div class="frow"><b>The war party</b>${bar(b.bar, b.word, "party")}<em>${esc(b.word)}</em></div>
       ${b.objective ? `<div class="frow"><b>${esc(b.objective)}</b>${bar(b.objective_bar, b.objective_word, "objective")}<em>${esc(b.objective_word)}</em></div>` : ""}
-      <div class="ftags">${b.advantages.map((t) => `<span class="ftag good">${iconize(esc(t))}</span>`).join("")}${b.complications.map((t) => `<span class="ftag bad">${iconize(esc(t))}</span>`).join("")}</div>
+      <div class="ftags">${b.advantages.map((t) => ftag(t, "good")).join("")}${b.complications.map((t) => ftag(t, "bad")).join("")}</div>
     </div>` : "";
+  const names = (v) => (v || []).map((w) => (w && typeof w === "object" ? w.name : w) || "").filter(Boolean);
   const foes = f.foes.map((x) => {
+    x = { ...x, weapons: names(x.weapons), features: names(x.features), engaged: names(x.engaged) };
     const pic = x.image ? `<img src="${esc(x.image)}" alt="">` : `<span class="ph">${esc(x.name[0])}</span>`;
     const count = x.count > 1 ? ` ×${x.count}${x.down ? ` <small>(${x.down} down)</small>` : ""}` : "";
     const nums = Object.entries(x.known || {}).map(([k, v]) => `<span class="fnum">${esc(k)} ${esc(v)}</span>`).join("");
@@ -619,8 +702,56 @@ function renderFight(f) {
       ${f.log.length ? `<div class="flog">${f.log.map((l) => `<div>${iconize(esc(l))}</div>`).join("")}</div>` : ""}
     </details>`;
 }
+// ------------------------------------------------------------------ the Council panel
+// What the hero can tell of a council: who listens and their mood, what the hero asks, how far they are swayed
+// (a bar and a word, never the numbers), the exchanges they will allow and how many are spent.
+function renderCouncil(c) {
+  const box = $("#council");
+  if (!c) { box.hidden = true; box.innerHTML = ""; return; }
+  box.hidden = false;
+  const faces = c.who.map((w) => w.image ? `<img src="${esc(w.image)}" alt="" title="${esc(w.name)}">`
+    : `<span class="ph" title="${esc(w.name)}">${esc(w.name[0])}</span>`).join("");
+  const n = c.rounds || 0;
+  const pips = n ? Array.from({ length: n }, (_, i) => `<span class="pip${i < c.used ? " done" : ""}"></span>`).join("") : "";
+  const left = n ? `${Math.max(0, n - c.used)} of ${n} left` : "the introduction comes first";
+  const head = [c.who.map((w) => w.name).join(", "), c.attitude].filter(Boolean).join(" · ");
+  box.innerHTML = `<details id="council-fold"${isOpen("council-fold", true) ? " open" : ""}>
+      <summary><span class="ftitle">☙ ${esc(c.title)}</span><em>${esc(head)}</em></summary>
+      <div class="foe"><span class="cfaces">${faces}</span><div class="fbody">
+        ${c.request ? `<div class="crequest">${iconize(esc(c.request))}</div>` : ""}
+        ${c.bar != null ? `<div class="frow"><b>Swayed</b><div class="fbar sway"><span style="width:${Math.round(c.bar * 100)}%"></span></div><em>${esc(c.word)}</em></div>` : ""}
+        <div class="frow"><b>Exchanges</b><span class="pips">${pips}</span><em>${esc(left)}</em></div>
+      </div></div>
+      ${c.log.length ? `<div class="flog">${c.log.map((l) => `<div>${iconize(esc(l))}</div>`).join("")}</div>` : ""}
+    </details>`;
+}
+// ------------------------------------------------------------------ the Fellowship panel
+// The phase as a checklist that survives a break: the duration, the steps done and the next one, the points the
+// hero has to spend, the undertakings allowed and taken, and what befell the Band if anything did.
+function renderFellowship(p) {
+  const box = $("#fellowship");
+  if (!p) { box.hidden = true; box.innerHTML = ""; return; }
+  box.hidden = false;
+  const steps = p.steps.map((s) => `<span class="fstep${s.done ? " done" : s.next ? " next" : ""}">${s.done ? "✓" : s.next ? "▸" : "○"} ${esc(s.label)}</span>`).join("");
+  const n = p.undertakings;
+  const pips = n ? Array.from({ length: n }, (_, i) => `<span class="pip${i < p.chosen.length ? " done" : ""}"></span>`).join("") : "";
+  const und = n == null ? "" : n === 0 ? "none this time"
+    : `${Math.max(0, n - p.chosen.length)} of ${n} left${p.chosen.length ? ": " + p.chosen.map(esc).join(", ") : ""}`;
+  const done = p.steps.filter((s) => s.done).length;
+  const head = [p.duration[0].toUpperCase() + p.duration.slice(1), `${done} of ${p.steps.length} done`].join(" · ");
+  box.innerHTML = `<details id="fellowship-fold"${isOpen("fellowship-fold", true) ? " open" : ""}>
+      <summary><span class="ftitle">✦ Fellowship${p.place ? " at " + esc(p.place) : ""}</span><em>${esc(head)}</em></summary>
+      <div class="fbody">
+        <div class="fsteps">${steps}</div>
+        <div class="frow"><b>Points</b><span title="Skill points buy Skills; Adventure points buy Proficiencies, Valour and Wisdom">Skill ${esc(p.xp.skill)} · Adventure ${esc(p.xp.adventure)}</span></div>
+        ${n != null ? `<div class="frow"><b>Undertakings</b><span class="pips">${pips}</span><em>${und}</em></div>` : ""}
+        ${p.interruption ? `<div class="frow"><b>Interrupted</b><span>${iconize(esc(p.interruption))}</span></div>` : ""}
+      </div>
+      ${p.log.length ? `<div class="flog">${p.log.map((l) => `<div>${iconize(esc(l))}</div>`).join("")}</div>` : ""}
+    </details>`;
+}
 document.addEventListener("toggle", (ev) => {
-  if (ev.target.id === "fight-fold" || ev.target.id === "journey-fold") {
+  if (["fight-fold", "journey-fold", "council-fold", "fellowship-fold"].includes(ev.target.id)) {
     try { localStorage.setItem("rw.open." + ev.target.id, ev.target.open ? "1" : "0"); } catch {}
   }
 }, true);
@@ -677,7 +808,7 @@ function renderRolls() {
   const rows = rollLog.slice(-40).reverse().map((r, i) => {
     const mark = r.kind === "oracle" ? "?" : r.ok ? "✓" : "✗";
     const res = r.kind === "oracle" ? esc(r.answer) : `${r.total} vs ${r.tn}${r.degree && r.ok && r.degree !== "success" ? " · " + esc(r.degree) : ""}`;
-    return `<div class="rl ${r.kind === "oracle" ? "or" : r.ok ? "ok" : "ko"}${r.adversary ? " adv" : ""}" data-i="${rollLog.length - 1 - i}" title="Show it in the tale">
+    return `<div class="rl ${r.kind === "oracle" ? "or" : r.ok ? "ok" : "ko"}${r.adversary ? " adv" : ""}" data-i="${rollLog.length - 1 - i}" title="Show it in the tale" tabindex="0" role="button" data-key-click="1">
       <span class="m">${mark}</span><span class="w">${iconize(esc(r.who ? `${r.who}: ${r.what}` : r.what))}</span><span class="r">${iconize(res)}</span></div>`;
   }).join("");
   const mine = rollLog.filter((r) => r.kind === "roll" && !r.adversary);
@@ -714,13 +845,21 @@ function setBusy(busy) {
   b.disabled = !busyNow;
   if (!busyNow) b.textContent = "Interrupt";
 }
+const PLACEHOLDER = input.placeholder;
+// Screen readers hear finished narration and what waits, not every streamed frame.
+function announce(text) { const a = $("#announce"); if (a) a.textContent = String(text || "").slice(0, 600); }
 function updateActivity(text) {
   const waiting = trays.size > 0;
+  const reading = waiting && [...trays.values()].pop().classList.contains("reading");
+  input.placeholder = !reading ? PLACEHOLDER
+    : askingAboutReading ? "Your question to Ringwraith about the oracle"
+    : "Your own reading of the oracle, or accept Ringwraith's above";
   document.body.classList.toggle("tray-open", waiting);
   const a = $("#activity");
   a.classList.toggle("on", busyNow);
   a.classList.toggle("waiting", waiting);
-  if (waiting) $("#activity-text").textContent = "Ringwraith waits for your roll…";
+  if (waiting) $("#activity-text").textContent = [...trays.values()].pop().classList.contains("reading")
+    ? "Ringwraith waits for your reading of the oracle…" : "Ringwraith waits for your roll…";
   else if (text) $("#activity-text").textContent = text;
   else if (!busyNow) $("#activity-text").textContent = "Ringwraith is writing…";
 }
@@ -760,6 +899,7 @@ function handle(e) {
       }
       const t = rollTray(e);
       trays.set(e.id, t);
+      if (!replaying) announce(`Roll waiting: ${e.who}, ${e.what}, TN ${e.tn}. Ctrl+Enter rolls.`);
       dockEl.appendChild(t);
       updateActivity();
       if (!replaying) setTucked(false);
@@ -774,15 +914,40 @@ function handle(e) {
         degree: e.degree, adversary: !!e.adversary, card });
       break;
     }
-    case "roll_cancelled": closeTray(e.id); break;
+    case "roll_cancelled": case "reading_cancelled": closeTray(e.id); break;
+    case "reading_request": {     // the player reads the oracle: accept Ringwraith's reading or type their own
+      if (e.stale) {
+        const c = add(el("div", "card stale", `<div><div class="label">ORACLE READING INTERRUPTED</div>The table restarted before you read the oracle: ${iconize(esc(e.question))}</div>`));
+        const b = el("button", null, "Ask again");
+        b.type = "button";
+        b.style.marginLeft = "auto";
+        b.onclick = () => say(`(The table restarted while my reading of the oracle "${e.question}" was waiting. Please offer your reading again.)`);
+        c.appendChild(b);
+        break;
+      }
+      const t = readingTray(e);
+      trays.set(e.id, t);
+      if (!replaying) announce(`Your reading of the oracle waits: ${e.question}. Ctrl+Enter accepts Ringwraith's.`);
+      dockEl.appendChild(t);
+      updateActivity();
+      if (!replaying) setTucked(false);
+      scrollDown(true);
+      break;
+    }
+    case "reading_result": {
+      closeTray(e.id);
+      const card = add(el("div", "card reading", `<div><div class="label">${e.own ? "YOUR READING" : "READING ACCEPTED"} · ${iconize(esc(e.question))}</div>${iconize(esc(e.text))}</div>`));
+      logRoll({ kind: "oracle", what: `Reading: ${e.question}`, answer: String(e.text || "").slice(0, 60), card });
+      break;
+    }
     case "oracle": {
       const c = el("div", "card");
       c.innerHTML = e.kind === "telling"
         ? `<div><div class="label">THE TELLING · ${esc(e.chance)}</div>${iconize(esc(e.question))}</div><div class="answer" style="margin-left:auto">${iconize(esc(e.answer))}</div>`
-        : `<div><div class="label">LORE TABLE</div><span style="white-space:pre-wrap">${iconize(esc(e.answer))}</span></div>`;
+        : `<div><div class="label">LORE TABLE${e.question ? " · " + iconize(esc(e.question)) : ""}</div><span style="white-space:pre-wrap">${iconize(esc(e.answer))}</span></div>`;
       if (e.kind === "telling") c.insertBefore(featDie(e.feat), c.firstChild);
       add(c);
-      logRoll({ kind: "oracle", what: e.kind === "telling" ? `Telling (${e.chance}): ${e.question}` : "Lore table",
+      logRoll({ kind: "oracle", what: e.kind === "telling" ? `Telling (${e.chance}): ${e.question}` : `Lore table${e.question ? ": " + e.question : ""}`,
         answer: String(e.answer || "").split("\n")[0].slice(0, 60), card: c });
       break;
     }
@@ -795,8 +960,28 @@ function handle(e) {
       sceneJob = e.job;
       painting(!!e.job);
       break;
+    case "sketch": {              // a drawing of something told, not seen: it fills in when it is done
+      endLive();
+      const f = add(el("figure", "sketch waiting", `<div class="sk-wait">sketching…</div><figcaption>${iconize(esc(e.caption || ""))}</figcaption>`));
+      f.id = "sk-" + e.job;
+      break;
+    }
+    case "image_failed": {        // the art worker gave up on it: say so rather than wait forever
+      const f = document.getElementById("sk-" + e.job);
+      if (f) { f.classList.remove("waiting"); f.querySelector(".sk-wait")?.replaceWith(el("div", "sk-wait", "the sketch couldn't be drawn")); }
+      if (e.job === sceneJob) { painting(false); sceneJob = null; }
+      break;
+    }
     case "image":
-      if (e.preset === "scene") {
+      if (e.preset === "sketch") {
+        const f = document.getElementById("sk-" + e.job);
+        if (f) {
+          f.classList.remove("waiting");
+          const a = Object.assign(document.createElement("a"), { href: e.url, target: "_blank", title: "Open the sketch" });
+          a.appendChild(Object.assign(document.createElement("img"), { src: e.url, alt: e.subject || "" }));
+          f.querySelector(".sk-wait")?.replaceWith(a);
+        }
+      } else if (e.preset === "scene") {
         if (!sceneJob || e.job === sceneJob) { setStage(e.url, undefined, !replaying); painting(false); sceneJob = null; }
       } else if (e.preset === "portrait" || e.preset === "adversary" || e.preset === "item") {
         const name = e.note ? e.note.split("/").pop().replace(/\.md$/, "") : "";
@@ -812,8 +997,10 @@ function handle(e) {
       }
       break;
     case "sheet": renderSheet(e.sheet); break;
-    case "fight": renderFight(e.fight); break;
-    case "journey": renderJourney(e.journey); break;
+    case "fight": showPanel("fight", e.fight); break;
+    case "council": showPanel("council", e.council); break;
+    case "fellowship": showPanel("fellowship", e.fellowship); break;
+    case "journey": showPanel("journey", e.journey); break;
     case "journey_mark": {        // a waymark in the tale where a moment of the road begins
       endLive();
       const m = add(el("div", "waymark k-" + (e.kind || "other"),
@@ -827,6 +1014,18 @@ function handle(e) {
       const cost = [f.hero ? `hero fatigue +${f.hero}` : "", f.band ? `Band fatigue +${f.band}` : ""].filter(Boolean).join(", ");
       add(el("div", "card journeyend", `<div><div class="label">${e.status === "abandoned" ? "THE COMPANY TURNS BACK" : "THE JOURNEY ENDS"}</div>
         <b>${esc(e.title)}</b>: ${esc(e.days)} days on the road${cost ? `; ${esc(cost)}` : ""}.${e.outcome ? ` ${iconize(esc(e.outcome))}` : ""}</div>`));
+      break;
+    }
+    case "fellowship_end": {
+      const c = el("div", "card councilend fellowshipend");
+      c.innerHTML = `<div><div class="label">THE FELLOWSHIP PHASE ENDS</div><b>${esc(e.duration ? e.duration[0].toUpperCase() + e.duration.slice(1) : "")}${e.place ? " at " + esc(e.place) : ""}</b>${e.outcome ? `: ${iconize(esc(e.outcome))}` : ""}</div>`;
+      add(c);
+      break;
+    }
+    case "council_end": {
+      const c = el("div", "card councilend");
+      c.innerHTML = `<div><div class="label">THE COUNCIL ENDS</div><b>${esc(e.title)}</b>${e.outcome ? `: ${iconize(esc(e.outcome))}` : ""}</div>`;
+      add(c);
       break;
     }
     case "fight_end": {
@@ -855,7 +1054,7 @@ function showError(detail) {
   endLive();
   const box = el("div", "error-box");
   box.innerHTML = `<div><b>Ringwraith stumbled, and this turn didn't finish.</b> Nothing in the vault was lost.
-      ${lastSaid ? "Try again sends your last words once more." : ""}</div>
+      ${lastSaid && !replaying ? "Try again sends your last words once more." : "Type your last words again to carry on."}</div>
     <details><summary>What went wrong</summary><code>${esc(detail)}</code></details>`;
   if (lastSaid && !replaying) {
     const b = el("button", null, "Try again");
@@ -890,8 +1089,7 @@ function connect() {
       // A fresh start: everything shown is rebuilt from the replay.
       logEl.innerHTML = ""; dockEl.innerHTML = ""; trays.clear(); requests.clear(); live = []; rollLog.length = 0;
       pathsThisTurn = false; untoldSummary = null; sceneJob = null; nextOpening = true; lastSaid = "";
-      renderFight(null);
-      renderJourney(null);
+      for (const k in PANELS) showPanel(k, null);
       if (tucked) setTucked(false);
       replaying = true;
       for (const r of e.replay) { try { handle(r); } catch (err) { console.error(err, r); } }
@@ -916,10 +1114,20 @@ function connect() {
 }
 
 // Returns whether the words went; if the table is offline they stay in the box.
+// Keyboard use: what opens on a click opens on Enter or Space too; Ctrl+Enter rolls or accepts the waiting tray.
+function keyClickable(n) { n.tabIndex = 0; n.setAttribute("role", "button"); n.dataset.keyClick = "1"; return n; }
+document.addEventListener("keydown", (ev) => {
+  if ((ev.key === "Enter" || ev.key === " ") && ev.target.dataset?.keyClick) { ev.preventDefault(); ev.target.click(); return; }
+  if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey) && trays.size) {
+    const b = [...trays.values()].pop().querySelector("button:not(:disabled)");
+    if (b) { ev.preventDefault(); b.click(); }
+  }
+});
 function say(text) {
   text = text.trim();
   if (!text) return false;
-  return send({ t: "say", text });
+  const ask = askingAboutReading && [...trays.values()].some((t) => t.classList.contains("reading"));
+  return send({ t: "say", text, ...(ask ? { ask: true } : {}) });
 }
 function sayInput() { if (say(input.value)) input.value = ""; }
 
@@ -927,6 +1135,7 @@ $("#composer").addEventListener("submit", (ev) => { ev.preventDefault(); sayInpu
 input.addEventListener("keydown", (ev) => {
   if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); sayInput(); }
 });
+keyClickable($("#stage"));
 $("#stage").onclick = (ev) => {
   if ($("#stage").classList.contains("mapmode") || ev.target.closest(".stage-tabs")) return;
   $("#stage").classList.toggle("full");
@@ -959,7 +1168,8 @@ $("#stage").title = "Click to see the whole painting";
 $("#btn-begin").onclick = () => {
   // Mid-session it only repeats the load and the recap, so ask first; at the start it just begins.
   const lastStart = [...logEl.querySelectorAll(".player")].reverse().find((p) => /^\/session-(start|end)/.test(p.textContent));
-  if (!lastStart || /session-end/.test(lastStart.textContent)) { say("/session-start"); return; }
+  // The server starts a fresh conversation first if the last session was ended (cheaper turns, nothing lost).
+  if (!lastStart || /session-end/.test(lastStart.textContent)) { send({ t: "begin" }); return; }
   ask({ title: "Begin again?", ok: "Begin session", cancel: "Play on",
         text: "A session is already under way. Beginning again makes Ringwraith reload the campaign and recap; the story so far is kept." })
     .then((yes) => { if (yes) say("/session-start"); });
@@ -980,4 +1190,47 @@ $("#btn-new").onclick = () => {
         text: "Ringwraith forgets this conversation and reloads the campaign. The vault and the state are kept; only the chat memory resets." })
     .then((yes) => { if (yes) send({ t: "new_session" }); });
 };
+// ------------------------------------------------------------------ the Settings dialog
+// The campaign's settings the player may change here; the server accepts only these keys and values.
+async function openSettings() {
+  let data;
+  try { data = await (await fetch("/api/settings")).json(); }
+  catch { flashConn(); add(el("div", "note", "The settings couldn't be loaded. Is the table still running?")); return; }
+  const key = (v) => JSON.stringify(v ?? null);
+  const d = el("dialog", "rw-dialog rw-settings");
+  d.innerHTML = `<form method="dialog">
+      <h2>Settings</h2><div class="rw-rule">❦</div>
+      ${data.fields.map((f, i) => `<label class="rw-field">
+          <span class="rw-flabel" title="${esc(f.help)}">${esc(f.label)}</span>
+          <select data-i="${i}">${f.options.map((o) => `<option value="${esc(key(o.value))}"${key(o.value) === key(f.value) ? " selected" : ""}>${esc(o.label)}</option>`).join("")}</select>
+          <small class="rw-hint"></small></label>`).join("")}
+      <p class="rw-note">Saved for this campaign. A new model takes over from your next message.</p>
+      <div class="rw-actions">
+        <button value="cancel" class="ghost">Cancel</button>
+        <button value="ok" id="settings-save" disabled>Save</button>
+      </div>
+    </form>`;
+  const selects = [...d.querySelectorAll("select")];
+  const hint = (s) => {
+    const f = data.fields[s.dataset.i];
+    // what the setting is, then what the chosen value does: visible, not only in a hover tooltip
+    s.parentElement.querySelector(".rw-hint").textContent = [f.help, f.options[s.selectedIndex].hint].filter(Boolean).join(" ");
+  };
+  const changed = () => selects.filter((s) => s.value !== key(data.fields[s.dataset.i].value));
+  selects.forEach((s) => {
+    hint(s);
+    s.addEventListener("change", () => { hint(s); d.querySelector("#settings-save").disabled = !changed().length; });
+  });
+  d.addEventListener("click", (ev) => { if (ev.target === d) d.close("cancel"); });
+  d.addEventListener("close", () => {
+    if (d.returnValue === "ok") {
+      const values = Object.fromEntries(changed().map((s) => [data.fields[s.dataset.i].key, JSON.parse(s.value)]));
+      if (Object.keys(values).length) send({ t: "settings", values });
+    }
+    d.remove();
+  });
+  document.body.appendChild(d);
+  d.showModal();
+}
+$("#btn-settings").onclick = openSettings;
 connect();

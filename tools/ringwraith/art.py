@@ -215,7 +215,60 @@ PRESETS: dict[str, Preset] = {
     "item": Preset((768, 768), "{subject}, an object study on a dark wooden table, finely detailed craftsmanship"),
     "scene": Preset((1344, 576), "{subject}, wide cinematic composition, figures fully in frame with their heads "
                                  "well below the top edge, characters in their surroundings"),
+    # A small drawing in the tale of something told or heard, not seen: its own pencil look, never the house style.
+    "sketch": Preset((768, 512), "{subject}"),
 }
+SETTING = "Middle-earth, Third Age, pre-industrial, no text"
+SKETCH_STYLE = ("pencil and ink drawing on aged parchment, fine cross-hatching, sepia and graphite tones, "
+                "monochrome, loose sketchy linework, hand-drawn book illustration, no text")
+
+
+@dataclass(frozen=True)
+class Look:
+    """A named look from a style LoRA (settings: art.lora). `words` lead the prompt (usually the LoRA's trigger);
+    with house_style the rest of the prompt is the usual one, without it only the subject, mood and time."""
+    name: str
+    words: str
+    house_style: bool
+    file: str
+    strength: float
+
+
+def look_names(art_settings: dict) -> dict[str, str]:
+    """The configured looks and when to use them: {name: when}. Empty without a LoRA."""
+    lora = art_settings.get("lora") or {}
+    if not isinstance(lora, dict) or not lora.get("file"):
+        return {}
+    looks = lora.get("looks") or {}
+    if not isinstance(looks, dict):
+        return {}
+    return {str(n): str(v.get("when") or "") if isinstance(v, dict) else "" for n, v in looks.items()}
+
+
+def find_look(art_settings: dict, name: str | None) -> Look | None:
+    """The named look, or None when none is asked for. A sketch uses the look named 'sketch' if there is one.
+    Raises ArtError for an unknown look or a missing LoRA file."""
+    if not name:
+        return None
+    lora = art_settings.get("lora") or {}
+    looks = look_names(art_settings)
+    if name not in looks:
+        raise ArtError(f"no look {name!r}" + (f"; looks: {', '.join(looks)}" if looks else
+                                             " (no style LoRA is set up in art.lora)"))
+    f = Path(str(lora["file"])).expanduser()
+    if not f.is_absolute() or not f.is_file():
+        raise ArtError(f"art.lora.file must be the absolute path of an existing file: {f}")
+    v = lora["looks"][name]
+    if not isinstance(v, dict):
+        raise ArtError(f"art.lora.looks.{name} must be a mapping (words, house_style, when, strength)")
+    try:
+        strength = float(v.get("strength", lora.get("strength", 1.0)))
+    except (TypeError, ValueError):
+        raise ArtError(f"art.lora strength for {name!r} must be a number") from None
+    house = v.get("house_style", True)
+    if isinstance(house, str):             # a quoted "no" or "false" in hand-written YAML
+        house = house.strip().lower() not in ("no", "false", "off", "0")
+    return Look(name, str(v.get("words") or "").strip(), bool(house), str(f), strength)
 
 
 @dataclass
@@ -234,8 +287,12 @@ class ArtError(RuntimeError):
     pass
 
 
+class Unreachable(ArtError):
+    """The image server isn't answering (not started, or restarting): the job itself is fine, so try it later."""
+
+
 def build_prompt(preset: str, subject: str, mood: str | None = None, time: str | None = None,
-                 style: str | None = None) -> str:
+                 style: str | None = None, look: Look | None = None) -> str:
     if preset not in PRESETS:
         raise ArtError(f"unknown preset {preset!r}; choose from {', '.join(PRESETS)}")
     mood = (mood or DEFAULT_MOOD.get(preset, "calm")).lower()
@@ -252,7 +309,12 @@ def build_prompt(preset: str, subject: str, mood: str | None = None, time: str |
     if interior and preset == "scenery":          # a room is not a landscape
         template = "interior view of {subject}, the room close around"
     body = template.format(subject=subject.rstrip('. '))
-    return f"{lead}: {body}, {style_text(style, time, interior, is_ruin(subject), is_underground(subject), is_darkwood(subject))}"
+    words = f"{look.words} " if look and look.words else ""
+    if preset == "sketch":
+        return f"{words}{body}, {SKETCH_STYLE}"
+    if look and not look.house_style:
+        return f"{words}{lead}: {body}, {SETTING}"       # the style goes, the setting stays (no modern tents)
+    return f"{words}{lead}: {body}, {style_text(style, time, interior, is_ruin(subject), is_underground(subject), is_darkwood(subject))}"
 
 
 def _post(url: str, payload: dict, timeout: float) -> dict:
@@ -264,7 +326,7 @@ def _post(url: str, payload: dict, timeout: float) -> dict:
     except urllib.error.HTTPError as e:
         raise ArtError(f"Lemonade {e.code}: {e.read().decode('utf-8', 'replace')[:300]}") from e
     except urllib.error.URLError as e:
-        raise ArtError(f"Lemonade not reachable at {url}: {e.reason}") from e
+        raise Unreachable(f"Lemonade not reachable at {url}: {e.reason}") from e
 
 
 def image_models(base_url: str) -> list[dict]:
@@ -301,14 +363,32 @@ def free_vram_for(base_url: str, model: str, log=print) -> list[str]:
     return freed
 
 
+def lora_args(payload: dict, look: Look) -> str:
+    """sd-server's request options with a LoRA, to append to the prompt. sd-server reads only the first such block
+    and Lemonade sends seed, steps, cfg and negative prompt in a block of its own after the prompt, so this one
+    must carry them all. The LoRA path must be absolute."""
+    extra = {"seed": payload["seed"], "negative_prompt": payload["negative_prompt"],
+             "lora": [{"path": look.file, "multiplier": look.strength}]}
+    params = {}
+    if payload.get("steps"):
+        params["sample_steps"] = payload["steps"]
+    if payload.get("cfg_scale") is not None:
+        params["guidance"] = {"txt_cfg": payload["cfg_scale"]}
+    if params:
+        extra["sample_params"] = params
+    return f"<sd_cpp_extra_args>{json.dumps(extra)}</sd_cpp_extra_args>"
+
+
 def generate(base_url: str, model: str, prompt: str, size: tuple[int, int], seed: int | None = None,
-             steps: int | None = None, timeout: float = 600) -> tuple[Image.Image, int, float]:
+             steps: int | None = None, timeout: float = 600, look: Look | None = None) -> tuple[Image.Image, int, float]:
     seed = seed if seed is not None else random.randint(1, 2**31 - 1)
     payload = {"model": model, "prompt": prompt, "negative_prompt": NEGATIVE,
                "size": f"{size[0]}x{size[1]}", "n": 1, "response_format": "b64_json", "seed": seed}
     payload.update(MODEL_PARAMS.get(model, {}))
     if steps:
         payload["steps"] = steps
+    if look:
+        payload["prompt"] = prompt + lora_args(payload, look)
     t0 = time.perf_counter()
     try:
         data = _post(f"{base_url}/api/v1/images/generations", payload, timeout)
@@ -376,7 +456,7 @@ def edit(base_url: str, model: str, prompt: str, refs: list[Path], size: tuple[i
                 raise ArtError(f"Lemonade {e.code}: {msg}") from e
             time.sleep(3)       # usually the model is still loading
         except urllib.error.URLError as e:
-            raise ArtError(f"Lemonade not reachable: {e.reason}") from e
+            raise Unreachable(f"Lemonade not reachable: {e.reason}") from e
     img = Image.open(io.BytesIO(base64.b64decode(data["data"][0]["b64_json"]))).convert("RGB")
     return img, seed, time.perf_counter() - t0
 
@@ -427,15 +507,17 @@ def render_with_refs(base_url: str, preset: str, subject: str, refs: list[tuple[
 
 def render(base_url: str, model: str, preset: str, subject: str, out: Path,
            seed: int | None = None, steps: int | None = None, mood: str | None = None,
-           time: str | None = None, style: str | None = None) -> ArtResult:
-    prompt = build_prompt(preset, subject, mood, time, style)
+           time: str | None = None, style: str | None = None, look: Look | None = None) -> ArtResult:
+    prompt = build_prompt(preset, subject, mood, time, style, look)
     size = PRESETS[preset].size
-    img, seed, secs = generate(base_url, model, prompt, size, seed, steps)
-    img = grade(img, time, is_ruin(subject), is_darkwood(subject))
+    img, seed, secs = generate(base_url, model, prompt, size, seed, steps, look=look)
+    if preset != "sketch" and look is None:      # the grade belongs to the house style; a look brings its own light
+        img = grade(img, time, is_ruin(subject), is_darkwood(subject))
     out.parent.mkdir(parents=True, exist_ok=True)
     img.save(out)
     res = ArtResult(str(out), model, preset, subject, prompt, seed, f"{size[0]}x{size[1]}", round(secs, 1))
-    out.with_suffix(".json").write_text(json.dumps(asdict(res), indent=2, ensure_ascii=False), encoding="utf-8")
+    meta = asdict(res) | ({"look": look.name, "lora_strength": look.strength} if look else {})
+    out.with_suffix(".json").write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
     return res
 
 

@@ -25,6 +25,7 @@
     <button id="btn-end" class="ghost" title="Ringwraith writes up the session: the tale, people, places, rolls, experience">End session</button>
     <button id="btn-stop" class="ghost" title="Interrupt what Ringwraith is writing right now (the session goes on)">Interrupt</button>
     <button id="btn-new" class="ghost" title="Forget the conversation (the vault stays) and start fresh">New conversation</button>
+    <button id="btn-settings" class="ghost" title="The campaign's settings: the Loremaster's model, dice, difficulty, paintings">Settings</button>
     <a id="lnk-vault" class="ghost btn" target="_blank" rel="noopener" title="Open the campaign vault in Obsidian">Obsidian</a>
   </div>
 </header>
@@ -59,8 +60,11 @@
 
     <div class="page">
       <section class="fightpanel" id="fight" hidden></section>
+      <section class="fightpanel councilpanel" id="council" hidden></section>
+      <section class="fightpanel fellowshippanel" id="fellowship" hidden></section>
       <section class="journeypanel" id="journey" hidden></section>
-      <div class="log" id="log" aria-live="polite"></div>
+      <div class="log" id="log"></div>
+      <div class="sr-only" id="announce" aria-live="polite"></div>
       <div class="activity" id="activity"><span class="quill"></span><span id="activity-text">Ringwraith is writing…</span></div>
       <button type="button" class="dock-handle" id="dock-handle"></button>
       <div class="dock" id="dock"></div>

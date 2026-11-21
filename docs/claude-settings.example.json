@@ -10,18 +10,5 @@
     "additionalDirectories": [
       "C:/Users/you/Documents/Ringwraith"
     ]
-  },
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR/.venv/Scripts/ringwraith.exe\" status --hook 2>/dev/null || true",
-            "timeout": 20
-          }
-        ]
-      }
-    ]
   }
 }

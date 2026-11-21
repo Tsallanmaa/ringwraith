@@ -16,5 +16,6 @@ description: Offer the player 2-4 concrete directions for their hero (Paths) tie
 3. Aim for **variety**: at least one that follows the main thread, one that serves a Compass wish or an Ally's
    personal goal, and one side path or wildcard. For side paths, use `/hooks` thinking: the region's atoms and
    patron quests.
-4. Ask the closing question, then call `offer_paths` with them. The cards add "something else" themselves.
+4. Ask the closing question, then call `offer_paths` with them. (With Path cards off, `play.paths: false`, offer
+   them only when the player typed `/paths`.) The cards add "something else" themselves.
 5. Don't choose for the player, and don't hint which Path is "right". If they pick one, play it out.

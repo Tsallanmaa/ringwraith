@@ -10,7 +10,7 @@ development sessions with Claude Code (what may be committed, how campaign files
 python -m venv .venv
 .venv/Scripts/python -m pip install -e ".[dev]"      # bin/ instead of Scripts/ on Linux and macOS
 cp ringwraith.example.toml ringwraith.toml           # adjust the paths
-cp docs/claude-settings.example.json .claude/settings.json   # optional: your vaults path, the status hook
+cp docs/claude-settings.example.json .claude/settings.json   # optional: your vaults path
 git config core.hooksPath .githooks                  # enable the copyright guard
 ```
 
@@ -93,7 +93,8 @@ ringwraith lore-index                 # regenerate the lists in lore/INDEX.md
 
 ## Dice and tables from the command line
 
-The same rolls the table makes, for testing:
+The same rolls the table makes, for testing. They aren't written to the campaign's roll log, so they never reach
+a session record:
 
 ```sh
 ringwraith roll 3 --tn 14 --favoured --hope        # Feat die + 3 Success dice (+1 for Hope)
@@ -130,3 +131,14 @@ Claude switched off and photographs it at 1920×1200 with headless Chrome. The s
 To change a shot, edit its chapter or its entry in `SHOTS`. The paintings are in `screenshots/art/`; their
 prompts and seeds are in `ART`. The region maps are copied from a local campaign that has them
 (`--regions-from`, by default `lorien-test`). The Eriador map comes from the books and is never shown.
+
+To see the demo with your own style LoRA, paint and shoot it into a gitignored folder:
+
+```sh
+.venv/Scripts/python scripts/screenshots.py --art --into build/shots-lora --looks-from <campaign> --look hall=<look> ...
+.venv/Scripts/python scripts/screenshots.py --into build/shots-lora
+```
+
+`--looks-from` takes the campaign's `art.lora`, and each `--look` gives one painting a look; a sketch takes the
+campaign's `sketch` look by itself. The script refuses to paint with a LoRA into `docs/`: the repository's
+pictures stay in the house style.

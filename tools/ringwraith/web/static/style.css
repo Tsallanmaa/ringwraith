@@ -233,11 +233,11 @@ button.ghost:hover, .btn.ghost:hover { background: rgba(184, 145, 58, .12); }
 
 .narr.live.muted { display: none; }
 details.recap { margin: 0 auto 12px; font-size: 15px; color: var(--ink-soft); }
-details.recap summary { font-family: var(--display); font-size: 11px; letter-spacing: .12em; color: #8a7a62; }
+details.recap summary { font-family: var(--display); font-size: 11px; letter-spacing: .12em; color: #6e5e47; }
 details.recap .narr { margin-top: 6px; opacity: .85; }
 .aside {
-  font-size: 13px; font-style: italic; color: #8a7a62;
-  margin: -4px auto 10px; opacity: .8;
+  font-size: 13px; font-style: italic; color: #6e5e47;
+  margin: -4px auto 10px;
 }
 .aside::before { content: "✎ "; }
 .player {
@@ -411,6 +411,11 @@ details.recap .narr { margin-top: 6px; opacity: .85; }
 .bar > span { display: block; height: 100%; background: linear-gradient(90deg, var(--red), var(--gold)); }
 .tray-foot { display: flex; gap: 10px; align-items: center; margin-top: 10px; flex-wrap: wrap; font-size: 14px; }
 .tray-foot .hint { color: var(--ink-soft); font-style: italic; flex: 1; }
+.tray.reading .suggestion { margin: 4px 0 2px; font-size: 16px; padding: 8px 10px; border-left: 3px solid var(--gold);
+  background: rgba(184, 145, 58, .08); }
+.tray.reading .suggestion .label { display: block; font-family: var(--display); font-size: 11px; letter-spacing: .08em;
+  color: var(--ink-soft); text-transform: uppercase; }
+.card.reading { border-left: 3px solid var(--gold); }
 .linkish { background: none; border: none; color: var(--red-deep); text-decoration: underline; padding: 0; font-family: var(--text); font-size: 14px; letter-spacing: 0; }
 .linkish:hover:not(:disabled) { background: none; color: var(--red); }
 .manual { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--parchment-edge); display: none; }
@@ -519,7 +524,7 @@ summary { cursor: pointer; font-family: var(--display); font-size: 11px; letter-
 .clock.urgent b, .clock.urgent span::before { color: var(--red); }
 .disps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; text-align: center; margin: 6px 0 10px; }
 .disps div { border: 1px solid var(--parchment-edge); border-radius: 3px; padding: 2px 0; background: rgba(255,255,255,.3); }
-.disps b { display: block; font-family: var(--display); font-size: 8px; letter-spacing: .08em; color: var(--ink-soft); }
+.disps b { display: block; font-family: var(--display); font-size: 11px; letter-spacing: .02em; color: var(--ink-soft); }
 .ally { display: flex; gap: 10px; align-items: center; padding: 6px 0; border-top: 1px dotted var(--parchment-edge); }
 .ally img, .ally .ph {
   width: 46px; height: 58px; object-fit: cover; flex: 0 0 auto;
@@ -586,7 +591,7 @@ body.in-fight .stage.mapmode, body.on-road .stage.mapmode { height: 46vh; max-he
 body.in-fight .stage.banner:not(.mapmode) { max-height: 20vh; min-height: 96px; }
 body.in-fight .stage.banner .stage-title { font-size: clamp(18px, 2.4vw, 30px); bottom: 16px; }
 body.tray-open .fightpanel .fbattle, body.tray-open .fightpanel .foes, body.tray-open .fightpanel .flog { display: none; }
-body.tray-open .fightpanel summary::after { content: "folded while a roll waits"; font-size: 12px; font-style: italic; color: var(--ink-soft); }
+body.tray-open .fightpanel summary::after { content: "folded while the tray is open"; font-size: 12px; font-style: italic; color: var(--ink-soft); }
 
 /* ---- traits, Gifts and Quirks: small labels, what they do on hover */
 .traits { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0 2px; }
@@ -594,7 +599,7 @@ body.tray-open .fightpanel summary::after { content: "folded while a roll waits"
   font-size: 12px; line-height: 1.5; padding: 0 7px; border-radius: 9px; cursor: help;
   border: 1px solid var(--parchment-edge); background: rgba(255,255,255,.45); color: var(--ink);
 }
-.trait:hover, .trait:focus { border-color: var(--red); outline: none; }
+.trait:hover, .trait:focus { border-color: var(--red); }
 .trait.blessing, .trait.calling { border-color: rgba(184, 145, 58, .7); }
 .trait.virtue, .trait.reward { border-color: rgba(77, 94, 54, .55); }
 .trait.shadowpath { border-color: rgba(60, 52, 44, .5); color: var(--ink-soft); font-style: italic; }
@@ -627,6 +632,9 @@ body.tray-open .fightpanel summary::after { content: "folded while a roll waits"
 .ftag { font-size: 12px; padding: 1px 8px; border-radius: 10px; }
 .ftag.good { background: rgba(77, 94, 54, .18); color: var(--green); }
 .ftag.bad { background: rgba(142, 31, 26, .14); color: var(--red-deep); }
+.ftag[title] { cursor: help; }
+.ftag .feff { font-weight: 600; }
+.ftag .fpers { font-size: 11px; opacity: .75; }
 .foes { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 4px 14px; margin-top: 4px; }
 .foe { display: flex; gap: 8px; align-items: flex-start; }
 .foe.out { opacity: .5; }
@@ -642,6 +650,32 @@ body.tray-open .fightpanel summary::after { content: "folded while a roll waits"
 .fabil { border-color: rgba(142, 31, 26, .4); color: var(--red-deep); cursor: help; }
 .flog { margin-top: 6px; padding-top: 4px; border-top: 1px dotted var(--parchment-edge); font-size: 13px; color: var(--ink-soft); }
 .card.fightend { border-left: 4px solid #8e1f1a; }
+.councilpanel { border-color: #8c6a22; box-shadow: inset 0 0 18px rgba(140, 106, 34, .14), 0 2px 8px rgba(0,0,0,.2); }
+.councilpanel .ftitle { color: var(--ink); }
+.cfaces { display: flex; flex: 0 0 auto; }
+.cfaces img, .cfaces .ph { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; border: 2px solid #8c6a22;
+  margin-right: -8px; background: var(--parchment-2); display: grid; place-items: center; font-family: var(--display); }
+.cfaces + .fbody { margin-left: 12px; }
+.crequest { font-style: italic; font-size: 14px; margin-bottom: 2px; }
+.fbar.sway > span { background: linear-gradient(90deg, #8c6a22, #d8bd7a); }
+.councilpanel .pips { display: flex; gap: 4px; flex: 0 0 auto; }
+.councilpanel .pip { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid #8c6a22; }
+.councilpanel .pip.done { background: #8c6a22; }
+body.tray-open .councilpanel .foe, body.tray-open .councilpanel .flog { display: none; }
+.card.councilend { border-left: 4px solid #8c6a22; }
+.fellowshippanel { border-color: #3f5e3a; box-shadow: inset 0 0 18px rgba(63, 94, 58, .14), 0 2px 8px rgba(0,0,0,.2); }
+.fellowshippanel .ftitle { color: #2f4a2b; }
+.fsteps { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 13px; color: var(--ink-soft); margin-bottom: 3px; }
+.fstep.done { color: #3f5e3a; }
+.fstep.next { color: var(--ink); font-weight: 600; }
+.fellowshippanel .pips { display: flex; gap: 4px; flex: 0 0 auto; }
+.fellowshippanel .pip { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid #3f5e3a; }
+.fellowshippanel .pip.done { background: #3f5e3a; }
+body.tray-open .fellowshippanel .fbody, body.tray-open .fellowshippanel .flog { display: none; }
+.card.fellowshipend { border-left-color: #3f5e3a; }
+.xp { white-space: nowrap; }
+.tip { cursor: help; }
+.fellowshippanel .frow em { white-space: normal; }
 .card.mapcard { display: block; padding: 8px 10px 10px; }
 .card.mapcard img { display: block; width: 100%; max-width: 640px; margin: 0 auto 6px; border-radius: 3px;
   border: 1px solid var(--parchment-edge); box-shadow: 0 2px 8px rgba(0,0,0,.25); }
@@ -696,7 +730,7 @@ body.tray-open .fightpanel summary::after { content: "folded while a roll waits"
 .badge.fat { display: inline-flex; align-items: center; gap: 4px; }
 .badge.fat .step button { width: 14px; height: 14px; font-size: 10px; }
 button.badge.toggle { border: none; cursor: pointer; line-height: 1.5; }
-button.badge.toggle.off { background: transparent; color: var(--ink-soft); outline: 1px dashed var(--parchment-edge); opacity: .55; }
+button.badge.toggle.off { background: transparent; color: var(--ink-soft); outline: 1px dashed var(--parchment-edge); opacity: .8; }
 button.badge.toggle.off:hover { opacity: 1; }
 
 /* ---- the Tale panel: mission, journey, threads, Compass */
@@ -855,6 +889,15 @@ body.drawer-open #drawer-tabs .dtab:not(.on):hover { opacity: 1; }
 .rw-dialog button.ghost { color: var(--ink); border-color: var(--ink-soft); background: transparent; }
 .rw-dialog button.ghost:hover { background: rgba(91, 74, 54, .1); }
 .rw-dialog button.danger { background: var(--red-deep); }
+.rw-settings { text-align: left; width: min(460px, calc(100vw - 32px)); }
+.rw-settings h2, .rw-settings .rw-rule { text-align: center; }
+.rw-field { display: grid; grid-template-columns: 150px 1fr; align-items: center; gap: 2px 12px; margin: 0 0 12px; }
+.rw-flabel { font-family: var(--display); font-size: 12px; letter-spacing: .08em; color: var(--ink-soft); cursor: help; }
+.rw-field select { font: inherit; font-size: 15px; padding: 4px 6px; border: 1px solid var(--parchment-edge);
+  border-radius: 3px; background: rgba(255,255,255,.5); color: var(--ink); }
+.rw-hint { grid-column: 2; font-size: 13px; font-style: italic; color: var(--ink-soft); min-height: 1.2em; }
+.rw-dialog p.rw-note { font-size: 14px; margin: 4px 0 16px; text-align: center; }
+.rw-dialog button:disabled { opacity: .45; cursor: default; }
 @keyframes rw-unfold { from { opacity: 0; transform: translateY(8px) scale(.97); } to { opacity: 1; transform: none; } }
 
 /* ------------------------------------------------------------------ connection, errors, queued words */
@@ -954,7 +997,7 @@ body.tray-open .stage.mapmode, body.choosing .stage.mapmode { height: 34vh; max-
 .jf { font-size: 12px; color: var(--red-deep); white-space: nowrap; }
 .jempty { font-size: 13px; font-style: italic; color: var(--ink-soft); margin-top: 4px; }
 body.tray-open .journeypanel .jlog { display: none; }
-body.tray-open .journeypanel summary::after { content: "folded while a roll waits"; font-size: 12px; font-style: italic; color: var(--ink-soft); }
+body.tray-open .journeypanel summary::after { content: "folded while the tray is open"; font-size: 12px; font-style: italic; color: var(--ink-soft); }
 
 /* a waymark in the tale: where a moment of the road begins */
 .waymark {
@@ -965,3 +1008,17 @@ body.tray-open .journeypanel summary::after { content: "folded while a roll wait
 .waymark.k-interlude { color: #5a506e; }
 .waymark.flash { background: rgba(184, 145, 58, .25); }
 .card.journeyend { border-color: var(--green); }
+
+/* a sketch in the tale: something told or heard, drawn small beside the story */
+figure.sketch { margin: 10px auto 14px; max-width: 420px; text-align: center; }
+figure.sketch img { display: block; width: 100%; border-radius: 2px; border: 1px solid var(--parchment-edge);
+  box-shadow: 0 2px 8px rgba(0,0,0,.2); }
+figure.sketch .sk-wait { aspect-ratio: 3 / 2; display: grid; place-items: center; font-style: italic;
+  color: var(--ink-soft); border: 1px dashed var(--parchment-edge); border-radius: 2px; }
+figure.sketch figcaption { margin-top: 5px; font-style: italic; font-size: .9em; color: var(--ink-soft); }
+
+/* Keyboard focus is always visible (mouse clicks don't show it). */
+button:focus-visible, [data-key-click]:focus-visible, summary:focus-visible, .path:focus-visible, select:focus-visible {
+  outline: 2px solid var(--gold); outline-offset: 2px;
+}
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

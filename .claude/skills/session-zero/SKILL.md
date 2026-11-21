@@ -21,10 +21,22 @@ decide. Keep it warm and brisk.
    (story, the default: sized to keep the tale going; or standard: by the book) and **dice** (scripted, or
    physical dice entered in the tray). Set them with `ringwraith easy on|off`,
    `ringwraith settings difficulty.encounters story|standard` and `ringwraith dice-mode auto|manual`.
-4. Tell the player to open the vault folder in Obsidian ("Open folder as vault"), and give them the path.
+4. Ask how much the player wants to steer:
+   - **Oracles:** do you read them (you suggest a reading, the player accepts it or gives their own), or does the
+     player want to read every answer themselves? Default: you read them.
+     `ringwraith settings play.oracle loremaster|player`.
+   - **Path cards:** a few ways forward as cards at decision points, or none, so the player comes up with every
+     choice? Default: shown. `/paths` shows them on request either way. `ringwraith settings play.paths true|false`.
+   - Tell them about `/steer` (point the tale somewhere: "/steer toward Angmar") and that all of these can be
+     changed later in the table's Settings.
+5. Tell the player to open the vault folder in Obsidian ("Open folder as vault"), and give them the path.
 
 ## 2. The Compass
-Interview the player, then write `10 Campaign/Compass.md` in their words:
+Interview the player, then write `10 Campaign/Compass.md` in their words. Begin with the **premise**: is there
+a frame they already have in mind, beyond a backstory and the wishes below? For example, playing through a
+published adventure or campaign they own (find it in `lore/INDEX.md`; keep its secrets from them), a specific
+story ("we hunt the wight that killed my brother"), or a place and time to stay in. Write it under
+`## Premise`, or leave the section empty for a tale that grows from play. Then:
 - the tale they want;
 - what their hero seeks;
 - themes and moods;

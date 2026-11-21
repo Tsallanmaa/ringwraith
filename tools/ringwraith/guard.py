@@ -47,17 +47,26 @@ def _staged_blob(path: str) -> bytes:
     return subprocess.run(["git", "show", f":{path}"], check=True, capture_output=True).stdout
 
 
+REPO = Path(__file__).resolve().parents[2]
+
+
+def repo_path(f: str) -> str:
+    """A path given by hand (`./lore/x.md`, an absolute path) as the repo-relative path git would stage."""
+    p = Path(f).resolve()
+    return p.relative_to(REPO).as_posix() if p.is_relative_to(REPO) else f
+
+
 def run(paths: list[str] | None = None) -> int:
     staged = paths is None
     files = _staged() if staged else paths
     failures = 0
     for f in files:
         if staged:
-            data = _staged_blob(f)
+            data, where = _staged_blob(f), f
         else:
             p = Path(f)
-            data = p.read_bytes() if p.is_file() else None
-        for problem in check(f, data):
+            data, where = (p.read_bytes() if p.is_file() else None), repo_path(f)
+        for problem in check(where, data):
             print(f"ringwraith guard: {f}: {problem}", file=sys.stderr)
             failures += 1
     if failures:

@@ -25,37 +25,105 @@ log = logging.getLogger("ringwraith.table")
 PROMPT_FILE = Path(__file__).with_name("prompt.md")
 # Claude Code's built-in tools the Loremaster needs; the rest (agents, todos, notebooks, web…) would only cost
 # tokens in every request. The table's own tools come from its MCP server.
-BUILTIN_TOOLS = ["Read", "Glob", "Grep", "Edit", "Write", "Bash", "Skill", "ToolSearch"]
-READ_ONLY = {"Read", "Glob", "Grep", "Skill", "ToolSearch", "LS"}
+BUILTIN_TOOLS = ["Read", "Glob", "Grep", "Edit", "Write", "Bash", "Skill"]   # no ToolSearch: see _options
+READ_ONLY = {"Read", "Glob", "Grep", "Skill", "LS"}
+
+
+# Parts of the contract that matter only when a setting is on: `<!-- if:name -->` … `<!-- /if -->` in prompt.md.
+# Left out otherwise, they cost nothing on every call. The prompt is rebuilt when the table (re)connects, so a
+# change in the Settings dialog reconnects (PROMPT_SETTINGS), and a Compass change applies from the next session.
+CONDITIONAL = re.compile(r"<!-- if:([a-z-]+) -->\n(.*?)<!-- /if -->\n", re.S)
+PROMPT_SETTINGS = {"table.model", "play.oracle", "play.paths", "difficulty.easy"}
+
+
+def prompt_conditions() -> set[str]:
+    """Which conditional parts of the contract apply to the active campaign."""
+    from .. import tale, vault
+    try:
+        s = cp.load_settings()
+    except cp.CampaignError:
+        return set()
+    play, difficulty = s.get("play") or {}, s.get("difficulty") or {}
+    on = set()
+    if play.get("oracle") == "player":
+        on.add("oracle-player")
+    if not play.get("paths", True):
+        on.add("paths-off")
+    if difficulty.get("easy"):
+        on.add("easy")
+    try:
+        compass = cp.campaign_dir() / "10 Campaign" / "Compass.md"
+        if compass.exists() and tale.cutaways_on(vault.read_note(compass)[0]):
+            on.add("cutaways")
+    except Exception:  # noqa: BLE001 - a Compass that won't parse just leaves cutaways off
+        pass
+    return on
+
+
+def apply_conditions(text: str, on: set[str]) -> str:
+    return CONDITIONAL.sub(lambda m: m.group(2) if m.group(1) in on else "", text)
 
 
 def system_prompt(repo: Path) -> str:
     """The Loremaster contract followed by the rules card (lore/core.md, gitignored: from the user's books)."""
-    text = PROMPT_FILE.read_text(encoding="utf-8")
+    text = apply_conditions(PROMPT_FILE.read_text(encoding="utf-8"), prompt_conditions())
     core = repo / "lore" / "core.md"
     if core.exists():
         text += "\n\n" + core.read_text(encoding="utf-8")
     else:
         text += "\n\n(The rules card lore/core.md is missing: open lore/INDEX.md and the procedures for every rule.)"
-    return text
+    return text + looks_section()
+
+
+def looks_section() -> str:
+    """The campaign's painting looks (settings: art.lora), for `set_scene` and `queue_art`. Empty without any."""
+    from .. import art
+    try:
+        looks = art.look_names(cp.load_settings()["art"])
+    except Exception:  # noqa: BLE001 - a broken setting means no looks, not a broken table
+        return ""
+    picks = {n: w for n, w in looks.items() if n != "sketch"}
+    if not picks:
+        return ""
+    lines = "\n".join(f"- `{n}`: {w or 'when it suits the scene'}" for n, w in picks.items())
+    return ("\n\n## Painting looks (this campaign)\nBesides the house style, `set_scene` and `queue_art` take a "
+            "`look`. Pick one when the scene fits its description below, and leave it out otherwise; the house "
+            "style stays best for places full of small detail. A look paints without portrait references, so "
+            "leave it out when a named character's face matters.\n" + lines)
 FILE_TOOLS = {"Edit", "Write", "MultiEdit"}
 # ringwraith CLI commands that have a table tool instead (so they show up in the browser).
 # None: the whole command; otherwise just those subcommands. The rest of `note` and `map`
 # (note encounter, map session, map where…) stays open at the table.
 HAS_TOOL: dict[str, set[str] | None] = {
-    "roll": None, "ask": None, "table": None, "odds": None, "tn": None, "time": None, "deadline": None,
-    "counter": None, "note": {"new", "get", "set"}, "map": {"move", "place", "journey", "region"}}
+    "roll": None, "ask": None, "table": None, "odds": None, "tn": None,
+    "note": {"new", "get", "set"}, "map": {"move", "place", "journey", "region"}}
+# Commands with no place at the table: they would remove or swap the campaign mid-play, start a second server
+# or art worker, or rebuild the library. The table runs the art worker itself.
+NOT_AT_TABLE: dict[str, set[str] | None] = {
+    "archive": None, "reset": None, "switch": None, "serve": None, "extract": None, "render": None,
+    "lore-index": None, "art": {"worker", "test", "gen", "models"}}
 CLI_RE = re.compile(r"^\s*(?:\.venv[\\/]Scripts[\\/])?ringwraith(?:\.exe)?\s+(\S+)(?:\s+(\S+))?")
 
 
 def _blocked_patterns() -> list[str]:
-    """Bash rules that keep Ringwraith on the table tools."""
+    """Deny rules for the commands a table tool stands in for, and those with no place at the table. They must be
+    deny rules: the project settings allow `.venv/Scripts/ringwraith *`, and an allow rule is decided before
+    `can_use_tool` (_permit) is ever asked; only a deny rule wins over it."""
     out = []
-    for cmd, subs in sorted(HAS_TOOL.items()):
-        for c in ([cmd] if subs is None else [f"{cmd} {s}" for s in sorted(subs)]):
-            for exe in ("ringwraith", "ringwraith.exe"):       # the project settings allow both spellings
-                out += [f"Bash(.venv/Scripts/{exe} {c}:*)", f"Bash(.venv/Scripts/{exe} {c} *)"]
+    for table in (HAS_TOOL, NOT_AT_TABLE):
+        for cmd, subs in sorted(table.items()):
+            for c in ([cmd] if subs is None else [f"{cmd} {s}" for s in sorted(subs)]):
+                for exe in ("ringwraith", "ringwraith.exe"):       # the project settings allow both spellings
+                    out += [f"Bash(.venv/Scripts/{exe} {c}:*)", f"Bash(.venv/Scripts/{exe} {c} *)",
+                            f"Bash(.venv/Scripts/{exe} {c})"]
     return out
+
+
+def not_at_table(cmd: str, sub: str | None) -> bool:
+    if cmd not in NOT_AT_TABLE:
+        return False
+    subs = NOT_AT_TABLE[cmd]
+    return subs is None or (sub or "") in subs
 
 
 def has_tool(cmd: str, sub: str | None) -> bool:
@@ -65,12 +133,26 @@ def has_tool(cmd: str, sub: str | None) -> bool:
     subs = HAS_TOOL[cmd]
     return subs is None or (sub or "") in subs
 SHELL_META = re.compile(r"[;&|<>`$\n]")
-ROLL_TOOLS = {"request_roll", "roll_adversary", "ask", "roll_table"}
+ROLL_TOOLS = {"request_roll", "roll_adversary", "ask", "roll_table", "oracle_reading"}
 
 
 ACTIVITY = {"Read": "consults the lore", "Grep": "searches the lore", "Glob": "searches the lore",
             "Edit": "writes in the chronicle", "Write": "writes in the chronicle", "Skill": "opens a procedure",
             "Bash": "consults the tools"}
+
+
+def last_session_ended() -> bool:
+    """Whether the current session note was ended (session-end fills in its tale days). False when there is no
+    session yet (a new campaign keeps its session-zero conversation)."""
+    from .. import clock, vault
+    try:
+        n = int(clock.state()[1].get("session") or 0)
+        if not n:
+            return False
+        note = vault.session_note(n)
+        return note.exists() and bool(str(vault.read_note(note)[0].get("tale_days") or "").strip())
+    except Exception:  # noqa: BLE001 - when in doubt, keep the conversation
+        return False
 
 
 def where_now() -> str:
@@ -106,6 +188,8 @@ class Engine:
         self._asked = False               # the turn's story has ended with its closing question
         self._stopping = False            # the player pressed Stop
         self.sheet_changes: dict[str, dict] = {}   # hand edits to the hero sheet since the last message
+        self.settings_changes: dict[str, str] = {}  # settings changed in the dialog since the last message
+        self._reconnect = False                     # a new model: reconnect (same conversation) before the next turn
 
 
     # ------------------------------------------------------------ session
@@ -120,7 +204,8 @@ class Engine:
             return None
 
     def _save_session(self, sid: str) -> None:
-        self._session_file.write_text(json.dumps({"session_id": sid}), encoding="utf-8")
+        from .. import fileio
+        fileio.atomic_write(self._session_file, json.dumps({"session_id": sid}))
 
     def _prompt_file(self) -> Path:
         """Write the Loremaster's system prompt (the contract and the rules card) where the CLI can read it."""
@@ -136,10 +221,10 @@ class Engine:
             cwd=str(self.repo),
             add_dirs=[str(cp.campaign_dir())],
             setting_sources=["project"],
-            # The contract and rules card go in by file: passed inline they made the command line longer than
-            # Windows allows (32,767 characters), and the CLI failed to start ("Claude Code not found").
-            system_prompt={"type": "preset", "preset": "claude_code"},
-            extra_args={"append-system-prompt-file": str(self._prompt_file())},
+            # The contract and rules card are the whole system prompt, in place of Claude Code's coding preset
+            # (~4k tokens of git and coding guidance on every call; the skills are still listed). They go in by
+            # file: passed inline they made the command line longer than Windows allows (32,767 characters).
+            extra_args={"system-prompt-file": str(self._prompt_file())},
             tools=BUILTIN_TOOLS,
             mcp_servers={gametools.SERVER: self.server},
             allowed_tools=self.tool_names,
@@ -149,8 +234,13 @@ class Engine:
             include_partial_messages=True,
             resume=resume,
             model=table.get("model"),
-            # A roll waits for the player; don't let the tool call time out.
-            env={"MCP_TOOL_TIMEOUT": str(24 * 3600 * 1000)},
+            # A roll waits for the player; don't let the tool call time out. Tool search off: the table's own
+            # tools (~5k tokens) are loaded up front, which costs less than a ToolSearch round trip (a whole
+            # model call over the full context) each time one is first needed.
+            # Claude Code's own skills (code review, dataviz…) have no place at the table: listing them costs ~2k
+            # tokens on every call, and Ringwraith could wander into one.
+            env={"MCP_TOOL_TIMEOUT": str(24 * 3600 * 1000), "ENABLE_TOOL_SEARCH": "false",
+                 "CLAUDE_CODE_DISABLE_BUNDLED_SKILLS": "1"},
             stderr=lambda line: log.debug("claude: %s", line),
         )
 
@@ -171,8 +261,8 @@ class Engine:
                 if has_tool(m.group(1), m.group(2)):
                     what = " ".join(g for g in m.groups() if g) if HAS_TOOL[m.group(1)] else m.group(1)
                     return PermissionResultDeny(message=f"Use the table tool instead of `ringwraith {what}`.")
-                if m.group(1) == "art" and re.search(r"\bworker\b", cmd):
-                    return PermissionResultDeny(message="The table runs the art worker itself; don't start one.")
+                if not_at_table(m.group(1), m.group(2)):
+                    return PermissionResultDeny(message=f"`ringwraith {m.group(1)}` isn't run at the table.")
                 return PermissionResultAllow()
             return PermissionResultDeny(message="In the web table, Bash may only run single `ringwraith` commands.")
         return PermissionResultDeny(message=f"{name} is not available at the table.")
@@ -192,6 +282,14 @@ class Engine:
             log.warning("could not resume session %s; starting a new one", resume)
             self.client = ClaudeSDKClient(options=self._options(None))
             await self.client.connect()
+
+    async def begin(self) -> None:
+        """Begin session. After a session that was ended properly, start a fresh conversation first: everything
+        that matters is in the vault, and a long conversation makes every turn cost more, since each one rereads
+        it. A session that was never ended (a reboot, a closed tab) keeps its conversation."""
+        if last_session_ended():
+            await self.new_session()
+        await self.say("/session-start")
 
     async def new_session(self) -> None:
         """Forget the conversation (the vault and state stay). Use at the start of a play session."""
@@ -216,12 +314,24 @@ class Engine:
             self.client = None
 
     # ------------------------------------------------------------ turns
-    async def say(self, text: str) -> None:
-        """A message from the player. If a roll is waiting, the words answer it instead."""
+    async def say(self, text: str, ask: bool = False) -> None:
+        """A message from the player. If a roll is waiting, the words answer it instead; if an oracle reading is
+        waiting, the words are the player's own reading, or with `ask` a question to Ringwraith about it."""
         waiting = self.hub.pending_of("roll")
+        reading = self.hub.pending_of("reading")
+        command = text.lstrip().startswith(("/", "("))
+        if reading and not waiting and not command and not ask:
+            if self.hub.answer(reading[0], {"action": "own", "text": text}):
+                return                  # the reading card shows the words: no player bubble as well
         await self.hub.emit({"t": "player", "text": text})
-        if waiting:
-            self.hub.answer(waiting[0], {"action": "talk", "text": text})
+        if command:
+            # a command or a table button (End session, repaint, Ask again) is never an answer: it closes what
+            # waits, so the turn can finish, and then goes to Ringwraith
+            for iid in waiting + reading:
+                self.hub.answer(iid, {"action": "cancel"})
+        elif waiting and self.hub.answer(waiting[0], {"action": "talk", "text": text}):
+            return
+        elif reading and self.hub.answer(reading[0], {"action": "talk", "text": text}):
             return
         await self.queue.put(text + self._table_note())
 
@@ -240,6 +350,15 @@ class Engine:
                      + "; ".join(describe(c) for c in self.sheet_changes.values())
                      + ". Take these as the current values (don't re-apply them).")
             self.sheet_changes.clear()
+        if self.settings_changes:
+            edits += (" The player changed the campaign settings: " + "; ".join(self.settings_changes.values())
+                      + ". Play by them from now on.")
+            self.settings_changes.clear()
+        from .views import open_procedures
+        under_way = open_procedures()
+        if under_way:
+            edits += (f" Under way on the table: {', '.join(under_way)}. If this conversation hasn't seen it yet, "
+                      "call that tool with action 'show' and open its skill before going on.")
         if self._drifted:
             self._drifted = False
             edits += (" Your last reply drifted into mechanics and recap inside the story (oracle odds, day counts, "
@@ -261,6 +380,14 @@ class Engine:
             self.sheet_changes[change["key"]] = merged
         return merged
 
+    def settings_changed(self, changes: list[dict]) -> None:
+        """Settings saved from the dialog: tell Ringwraith with the next message, and pick up a new model at the
+        start of the next turn (never mid-turn: a roll may be waiting)."""
+        for c in changes:
+            self.settings_changes[c["key"]] = f"{c['label']}: {c['value']}"
+            if c["key"] in PROMPT_SETTINGS:      # a new model, or a part of the contract that comes or goes
+                self._reconnect = True
+
     async def interrupt(self) -> None:
         """Stop Ringwraith's turn. Interrupt first, then close any waiting roll, so the cancelled roll
         doesn't prompt Ringwraith to carry on writing."""
@@ -270,8 +397,10 @@ class Engine:
         await self.hub.emit({"t": "system", "text": "Interrupting Ringwraith…"})
         try:
             await self.client.interrupt()
+        except Exception:  # noqa: BLE001 - the CLI may be gone; the trays still close, the next turn starts clean
+            log.exception("interrupt failed")
         finally:
-            for iid in self.hub.pending_of("roll"):
+            for iid in self.hub.pending_of("roll") + self.hub.pending_of("reading"):
                 self.hub.answer(iid, {"action": "cancel"})
 
     async def _set_busy(self, busy: bool) -> None:
@@ -284,18 +413,27 @@ class Engine:
             await self._set_busy(True)
             self._paths_shown = False
             self._asked = False
+            self._stopping = False                # a Stop whose interrupt never came back mustn't carry over
             self.turn["story_since_roll"] = True
             self.turn["told"] = False             # any story written yet this turn?
             self.turn["held_paths"] = None        # Paths offered before the story told the outcome
             self.turn["owe_reply"] = None         # the player argued over a roll and awaits an answer
+            self.turn["asked_paths"] = text.lstrip().lower().startswith("/paths")   # cards even when they're off
             self._retell = self._retelling = False
             try:
+                if self._reconnect and self.client is not None:     # a new model, same conversation
+                    self._reconnect = False
+                    try:
+                        await self.client.disconnect()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    self.client = None
                 if self.client is None:
                     await self._connect()
                 await self.client.query(text)
                 async for msg in self.client.receive_response():
                     await self._handle(msg)
-                if self._retell:                  # the outcome came only as mechanics: ask once for the story
+                if self._retell and not self._stopping:   # the outcome came only as mechanics: ask once for the story
                     self._retell, self._retelling = False, True
                     self._paths_shown = self._asked = False
                     await self.client.query(RETELL)
@@ -329,8 +467,9 @@ class Engine:
             await self.hub.emit({"t": "narration", "text": text, "recap": True})
             return
         aside = is_aside(text, next_tool)
+        # mechanics only, or an OOC note alone: the retold story goes above it, before its closing question
         summary = (not aside and not self._retelling and not self.turn.get("story_since_roll", True)
-                   and is_mechanics_only(text))
+                   and (text.lstrip().startswith(">") or is_mechanics_only(text)))
         if summary:                               # mechanics only: the outcome is still untold as story
             await self.hub.emit({"t": "narration", "text": text, "summary": True})
             return
@@ -380,7 +519,8 @@ class Engine:
                     short = block.name.removeprefix(f"mcp__{gametools.SERVER}__")
                     await self._flush(short)
                     if short in ROLL_TOOLS:
-                        self.turn["story_since_roll"] = False
+                        # story_since_roll is cleared by the tool itself once something is rolled: clearing it
+                        # here raced the tool's own check and refused a turn's first roll as untold.
                         self.turn["held_paths"] = None   # another roll: those choices are stale
                         self._asked = False          # play goes on: what follows is new story
                     elif self._asked:

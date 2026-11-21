@@ -69,27 +69,41 @@ def _build_map_images() -> None:
 
 
 async def _watch_images(hub: Hub) -> None:
-    """Announce finished images (from art-done.jsonl) to the browser."""
+    """Announce finished (and failed) images from art-done.jsonl to the browser. One bad record or a passing
+    error must not stop the watcher: every later picture would then go unannounced."""
     done = cp.private_dir() / "art-done.jsonl"
-    seen = len(done.read_text(encoding="utf-8").splitlines()) if done.exists() else 0
+
+    def complete_lines() -> list[str]:
+        text = done.read_text(encoding="utf-8") if done.exists() else ""
+        lines = text.splitlines()
+        return lines if text.endswith("\n") or not lines else lines[:-1]   # a line still being written waits
+
+    seen = len(complete_lines())
     while True:
         await asyncio.sleep(2)
-        if not done.exists():
+        try:
+            lines = complete_lines()
+        except OSError:
             continue
-        lines = done.read_text(encoding="utf-8").splitlines()
         for line in lines[seen:]:
             try:
-                job = json.loads(line)
-            except ValueError:
-                continue
-            if job.get("status") == "done":
-                rel = job["file"].removeprefix("90 Assets/")
-                await hub.emit({"t": "image", "job": job["id"], "preset": job["preset"],
-                                "url": f"/assets/{rel}", "note": job.get("note"),
-                                "subject": job["subject"][:200]})
-                if job["preset"] in ("portrait", "adversary"):
-                    await hub.emit({"t": "sheet", "sheet": gametools.sheet()})
+                await _announce(hub, json.loads(line))
+            except Exception:  # noqa: BLE001
+                log.exception("art: could not announce %s", line[:120])
         seen = len(lines)
+
+
+async def _announce(hub: Hub, job: dict) -> None:
+    if job.get("status") == "failed":
+        await hub.emit({"t": "image_failed", "job": job["id"], "preset": job.get("preset")})
+        return
+    if job.get("status") != "done":
+        return
+    rel = job["file"].removeprefix("90 Assets/")
+    await hub.emit({"t": "image", "job": job["id"], "preset": job["preset"], "url": f"/assets/{rel}",
+                    "note": job.get("note"), "subject": str(job.get("subject", ""))[:200]})
+    if job["preset"] in ("portrait", "adversary"):
+        await hub.emit({"t": "sheet", "sheet": gametools.sheet()})
 
 
 def create_app() -> FastAPI:
@@ -122,6 +136,11 @@ def create_app() -> FastAPI:
     async def api_sheet():
         return JSONResponse(gametools.sheet())
 
+    @app.get("/api/settings")
+    async def api_settings():
+        from . import tablesettings
+        return JSONResponse(tablesettings.view())
+
     @app.get("/api/geo")
     async def api_geo():
         return JSONResponse(await asyncio.to_thread(gametools.geo_view))
@@ -149,13 +168,27 @@ def create_app() -> FastAPI:
                 msg = await ws.receive_json()
                 kind = msg.get("t")
                 if kind == "say" and str(msg.get("text", "")).strip():
-                    await engine.say(str(msg["text"]).strip())
+                    await engine.say(str(msg["text"]).strip(), ask=bool(msg.get("ask")))
                 elif kind == "answer":
                     hub.answer(str(msg.get("id")), msg.get("data") or {})
                 elif kind == "interrupt":
                     await engine.interrupt()
                 elif kind == "new_session":
                     await engine.new_session()
+                elif kind == "begin":
+                    await engine.begin()
+                elif kind == "settings":
+                    from . import tablesettings as ts
+                    try:
+                        changes = ts.apply(msg.get("values") or {})
+                    except ts.SettingsError as e:
+                        await ws.send_json({"t": "error", "text": str(e)})
+                        continue
+                    if changes:
+                        engine.settings_changed(changes)
+                        later = " (the new model takes over from your next message)"                             if any(c["key"] == "table.model" for c in changes) else ""
+                        await hub.emit({"t": "system", "text": f"Settings saved: {ts.describe(changes)}{later}."})
+                        await hub.emit({"t": "sheet", "sheet": gametools.sheet()})
                 elif kind == "adjust":
                     from . import panels
                     try:

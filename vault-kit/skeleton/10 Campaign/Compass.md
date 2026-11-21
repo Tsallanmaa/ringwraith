@@ -10,6 +10,9 @@ cutaways: off           # on: now and then a short scene elsewhere (the foe's ca
 
 *You write this note. Ringwraith reads it at the start of every session and steers by it.*
 
+## Premise
+-
+
 ## The tale I want to tell
 -
 
@@ -21,6 +24,9 @@ cutaways: off           # on: now and then a short scene elsewhere (the foe's ca
 
 ## Arcs and places I'd like to visit
 -
+
+## Steering
+<!-- /steer at the table adds directions here; Ringwraith marks them reached. Add or remove your own. -->
 
 ## Lines and veils
 - **Lines** (never happens):

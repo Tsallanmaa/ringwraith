@@ -14,6 +14,7 @@ before), and `abilities` the Fell Abilities it has shown.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from .. import campaign as cp
@@ -63,13 +64,70 @@ def _foe(spec: dict) -> dict:
         "endurance": end, "endurance_max": _int(spec.get("endurance_max")) or end,
         "hate": hate, "hate_max": _int(spec.get("hate_max", spec.get("resolve_max"))) or hate,
         "hate_kind": "Resolve" if "resolve" in spec and "hate" not in spec else "Hate",
-        "might": _int(spec.get("might")), "features": list(spec.get("features") or []),
-        "weapons": list(spec.get("weapons") or []), "wounded": bool(spec.get("wounded")),
+        "might": _int(spec.get("might")), "features": _names(spec.get("features")),
+        "weapons": _names(spec.get("weapons")), "wounded": bool(spec.get("wounded")),
         "parry": _int(spec.get("parry")), "armour": _int(spec.get("armour")),
         "known": _known(spec.get("known")), "abilities": _abilities(spec.get("abilities")),
         "weary": bool(spec.get("weary")), "state": spec.get("state") or "fighting",
-        "engaged": list(spec.get("engaged") or []),
+        "engaged": _names(spec.get("engaged")),
     }
+
+
+BRACKETS = re.compile(r"\s*\(([^()]*)\)")
+DICE = re.compile(r"[+−-]\s*\d+\s*d\b")
+
+
+def _parse_effect(text: str) -> dict:
+    """Read a plain-text advantage: "Loose shoes (persistent, +1d on Clash rolls): the horses stumble." gives
+    {name: Loose shoes, effect: +1d, persistent: True, text: the horses stumble.}. A bracket that says neither
+    stays in the name."""
+    name, sep, story = text.partition(": ")
+    effect, persistent = "", False
+
+    def tags(m: re.Match) -> str:
+        nonlocal effect, persistent
+        inner = m.group(1)
+        dice, lasting = DICE.search(inner), "persistent" in inner.lower()
+        if not (dice or lasting):
+            return m.group(0)
+        effect = effect or (dice.group(0).replace(" ", "") if dice else "")
+        persistent = persistent or lasting
+        return ""
+    name = BRACKETS.sub(tags, name)
+    story = story.strip() if sep else ""
+    return {"name": name.strip(), "effect": effect, "persistent": persistent, "text": story[:1].upper() + story[1:]}
+
+
+def _effects(v) -> list[dict]:
+    """Battle advantages and complications: {name, effect ("+1d"), persistent, text (a line of story, the
+    panel's tooltip)}. Plain text works too (`_parse_effect`)."""
+    if isinstance(v, (str, dict)):
+        v = [v]
+    out = []
+    for x in v or []:
+        if isinstance(x, dict):
+            e = {"name": str(x.get("name") or ""), "effect": str(x.get("effect") or ""),
+                 "persistent": bool(x.get("persistent")), "text": str(x.get("text") or "")}
+            if not (e["effect"] or e["persistent"] or e["text"]):
+                e = _parse_effect(e["name"])          # everything written into the name
+        else:
+            e = _parse_effect(str(x))
+        e["effect"] = e["effect"].replace("-", "−")
+        if e["name"]:
+            out.append(e)
+    return out
+
+
+def _label(e: dict) -> str:
+    return e["name"] + (f" ({e['effect']})" if e["effect"] else "") + (" (persistent)" if e["persistent"] else "")
+
+
+def _names(v) -> list[str]:
+    """A list of names. A weapon or feature given as a mapping ({name, rating, damage…}) keeps only its name: the
+    rest is Loremaster knowledge, and the panel shows names."""
+    if isinstance(v, (str, dict)):
+        v = [v]
+    return [str(x.get("name") or "") if isinstance(x, dict) else str(x) for x in v or [] if x]
 
 
 def _known(v) -> list[str]:
@@ -89,6 +147,7 @@ def _abilities(v) -> list[dict]:
     return out
 
 
+@fileio.with_lock
 def start(kind: str, title: str, foes: list[dict], battle: dict | None = None, stance: str | None = None) -> dict:
     if kind not in ("combat", "battle"):
         raise FightError("kind is combat or battle")
@@ -101,13 +160,14 @@ def start(kind: str, title: str, foes: list[dict], battle: dict | None = None, s
                            "resistance_max": _int(b.get("resistance_max")) or res, "might": _int(b.get("might")),
                            "objective": b.get("objective"), "objective_resistance": _int(b.get("objective_resistance")),
                            "objective_max": _int(b.get("objective_max")) or _int(b.get("objective_resistance")),
-                           "advantages": list(b.get("advantages") or []),
-                           "complications": list(b.get("complications") or []),
+                           "advantages": _effects(b.get("advantages")),
+                           "complications": _effects(b.get("complications")),
                            "focus": b.get("focus"), "band_stance": b.get("band_stance")}
     _save(state)
     return state
 
 
+@fileio.with_lock
 def update(changes: dict) -> dict:
     """Merge changes: round, stance, log (a line), foes (matched by name; new names are added), battle fields."""
     state = load()
@@ -135,7 +195,7 @@ def update(changes: dict) -> dict:
                 foe[k] = bool(spec[k])
         for k in ("features", "weapons", "engaged"):
             if spec.get(k) is not None:
-                foe[k] = list(spec[k])
+                foe[k] = _names(spec[k])
         if spec.get("state"):
             if spec["state"] not in FOE_STATES:
                 raise FightError(f"a foe's state is one of {', '.join(FOE_STATES)}")
@@ -146,13 +206,14 @@ def update(changes: dict) -> dict:
             if v is None:
                 continue
             b[k] = _int(v) if k in ("clash", "resistance", "resistance_max", "might", "objective_resistance",
-                                    "objective_max") else (list(v) if k in ("advantages", "complications") else v)
+                                    "objective_max") else (_effects(v) if k in ("advantages", "complications") else v)
     if changes.get("log"):
         state["log"] = (state.get("log") or []) + [str(changes["log"])]
     _save(state)
     return state
 
 
+@fileio.with_lock
 def end(outcome: str) -> dict:
     state = load()
     if not state:
@@ -204,8 +265,8 @@ def public_view(state: dict | None, portrait=None) -> dict | None:
                                  ("Weary", f.get("weary") or (f.get("hate") == 0 and f.get("hate_max")))) if on]
         foes.append({"name": f["name"], "count": f.get("count", 1), "down": f.get("down", 0),
                      "bar": None if f["state"] != "fighting" else bar, "word": word, "marks": marks,
-                     "features": f.get("features") or [], "weapons": f.get("weapons") or [],
-                     "engaged": f.get("engaged") or [], "state": f["state"], "known": _numbers(f),
+                     "features": _names(f.get("features")), "weapons": _names(f.get("weapons")),
+                     "engaged": _names(f.get("engaged")), "state": f["state"], "known": _numbers(f),
                      "abilities": f.get("abilities") or [],
                      "image": portrait(f.get("note") or f["name"]) if portrait else None})
     out = {"kind": state["kind"], "title": state["title"], "round": state.get("round"), "stance": state.get("stance"),
@@ -213,11 +274,14 @@ def public_view(state: dict | None, portrait=None) -> dict | None:
     b = state.get("battle")
     if b:
         bar, word = _hold(b.get("resistance"), b.get("resistance_max"))
+        for f in foes:      # a group with no Endurance of its own (the rank and file) holds as the war party does
+            if f["state"] == "fighting" and f["bar"] is None and bar is not None:
+                f["bar"], f["word"] = bar, word
         obar, oword = _hold(b.get("objective_resistance"), b.get("objective_max"))
         out["battle"] = {"clash": b.get("clash"), "bar": bar, "word": word, "objective": b.get("objective"),
                          "objective_bar": obar, "objective_word": oword.replace("holding", "contested")
                          .replace("wavering", "yielding").replace("breaking", "nearly won").replace("broken", "won"),
-                         "advantages": b.get("advantages") or [], "complications": b.get("complications") or [],
+                         "advantages": _effects(b.get("advantages")), "complications": _effects(b.get("complications")),
                          "focus": b.get("focus"), "band_stance": b.get("band_stance")}
     return out
 
@@ -241,7 +305,7 @@ def summary(state: dict) -> str:
         lines.append(f"Battle: clash {b.get('clash')}, war party Resistance {b.get('resistance')}/{b.get('resistance_max')}"
                      f", Might {b.get('might')}; objective {b.get('objective') or '-'} "
                      f"{b.get('objective_resistance')}/{b.get('objective_max')}; advantages: "
-                     f"{', '.join(b.get('advantages') or []) or '-'}; complications: "
-                     f"{', '.join(b.get('complications') or []) or '-'}; focus {b.get('focus') or '-'}, "
+                     f"{', '.join(map(_label, _effects(b.get('advantages')))) or '-'}; complications: "
+                     f"{', '.join(map(_label, _effects(b.get('complications')))) or '-'}; focus {b.get('focus') or '-'}, "
                      f"Band stance {b.get('band_stance') or '-'}")
     return "\n".join(lines)

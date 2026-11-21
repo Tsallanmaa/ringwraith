@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ringwraith"
+version = "0.1.0"
+description = "Solo Loremaster toolkit for The One Ring 2e, run by Claude Code with an Obsidian campaign vault"
+requires-python = ">=3.12"
+dependencies = [
+    "pymupdf>=1.24",
+    "pyyaml>=6",
+    "pillow>=10",
+    "numpy>=1.26",
+    "claude-agent-sdk>=0.2",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+ocr = ["rapidocr-onnxruntime>=1.3"]     # PDFs with no text layer: `ringwraith extract <id> --ocr`
+
+[project.scripts]
+ringwraith = "ringwraith.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["tools"]
+
+[tool.setuptools.package-data]
+"ringwraith.web" = ["prompt.md", "static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

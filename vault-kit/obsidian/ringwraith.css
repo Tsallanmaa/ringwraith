@@ -1,0 +1,192 @@
+/* Ringwraith: a theme snippet for a campaign vault (installed by `ringwraith obsidian setup`).
+   Obsidian's light mode becomes "Parchment" (ink on aged paper) and dark mode "Shadow" (parchment light on
+   night-dark leather). Our own CSS and colours, after the look of the web table; no book art.
+   Callouts for the tale: tale, loremaster, oracle, player, eye, hope, shadow; success and failure for rolls. */
+
+@import url("https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&display=swap");
+
+body {
+  --rw-display: "Cinzel", "Trajan Pro", Georgia, serif;
+  --rw-text: "EB Garamond", Garamond, Georgia, serif;
+  --font-text-theme: var(--rw-text);
+  --font-interface-theme: var(--rw-text);
+  --h1-font: var(--rw-display);
+  --h2-font: var(--rw-display);
+  --h3-font: var(--rw-display);
+  --font-text-size: 18px;
+  --line-height-normal: 1.55;
+  --h1-size: 1.9em;
+  --h2-size: 1.35em;
+  --h3-size: 1.12em;
+  --h1-weight: 700;
+  --h2-weight: 500;
+  --h3-weight: 500;
+}
+
+/* ---------------------------------------------------------------- Parchment (light) */
+.theme-light {
+  --rw-ink: #2a1f15;
+  --rw-ink-soft: #5b4a36;
+  --rw-red: #8e1f1a;
+  --rw-red-deep: #6b1612;
+  --rw-gold: #b8913a;
+  --rw-edge: #c9b48a;
+  --background-primary: #efe3c6;
+  --background-primary-alt: #e9dbb8;
+  --background-secondary: #e6d6b2;
+  --background-secondary-alt: #dccaa2;
+  --background-modifier-border: #c9b48a;
+  --text-normal: var(--rw-ink);
+  --text-muted: var(--rw-ink-soft);
+  --text-faint: #8a7a62;
+  --text-accent: var(--rw-red);
+  --text-accent-hover: var(--rw-red-deep);
+  --interactive-accent: var(--rw-red);
+  --interactive-accent-hover: var(--rw-red-deep);
+  --link-color: var(--rw-red-deep);
+  --link-color-hover: var(--rw-red);
+  --link-unresolved-color: #9a7b55;
+  --h1-color: var(--rw-red-deep);
+  --h2-color: var(--rw-red-deep);
+  --h3-color: var(--rw-ink);
+  --hr-color: var(--rw-edge);
+  --blockquote-border-color: var(--rw-gold);
+  --table-border-color: var(--rw-edge);
+  --table-header-background: rgba(184, 145, 58, .12);
+  --code-background: rgba(0, 0, 0, .05);
+  --text-selection: rgba(184, 145, 58, .3);
+  --rw-paper: radial-gradient(ellipse at 50% 0%, rgba(255, 250, 235, .55), transparent 70%),
+              radial-gradient(ellipse at 50% 120%, rgba(120, 85, 40, .18), transparent 60%);
+}
+.theme-light .markdown-preview-view, .theme-light .markdown-source-view.mod-cm6 .cm-scroller {
+  background-image: var(--rw-paper);
+}
+
+/* ---------------------------------------------------------------- Shadow (dark) */
+.theme-dark {
+  --rw-ink: #e9dcbc;
+  --rw-ink-soft: #b9a888;
+  --rw-red: #c0574a;
+  --rw-red-deep: #d0705f;
+  --rw-gold: #d8bd7a;
+  --rw-edge: #4a3d2c;
+  --background-primary: #1b1712;
+  --background-primary-alt: #211b15;
+  --background-secondary: #231d16;
+  --background-secondary-alt: #2e261d;
+  --background-modifier-border: #3d3226;
+  --text-normal: var(--rw-ink);
+  --text-muted: var(--rw-ink-soft);
+  --text-faint: #8a7a62;
+  --text-accent: var(--rw-gold);
+  --text-accent-hover: #ecd59a;
+  --interactive-accent: #8e1f1a;
+  --interactive-accent-hover: #a8352a;
+  --link-color: var(--rw-gold);
+  --link-color-hover: #ecd59a;
+  --link-unresolved-color: #9a8460;
+  --h1-color: var(--rw-gold);
+  --h2-color: var(--rw-gold);
+  --h3-color: var(--rw-ink);
+  --hr-color: var(--rw-edge);
+  --blockquote-border-color: #8e1f1a;
+  --table-border-color: var(--rw-edge);
+  --table-header-background: rgba(216, 189, 122, .08);
+  --code-background: rgba(255, 255, 255, .04);
+  --text-selection: rgba(216, 189, 122, .25);
+}
+
+/* ---------------------------------------------------------------- type and ornament */
+.markdown-rendered h1, .markdown-rendered h2, .markdown-rendered h3,
+.HyperMD-header-1, .HyperMD-header-2, .HyperMD-header-3, .inline-title {
+  letter-spacing: .06em;
+}
+.inline-title { font-family: var(--rw-display); color: var(--h1-color); }
+.markdown-rendered h2 {
+  border-bottom: 1px solid var(--rw-edge);
+  padding-bottom: .15em;
+}
+.markdown-rendered hr {
+  border: none;
+  height: 1.4em;
+  text-align: center;
+  overflow: visible;
+}
+.markdown-rendered hr::after {               /* a fleuron instead of a rule */
+  content: "❦";
+  color: var(--rw-gold);
+  font-size: 1.1em;
+  letter-spacing: 1.2em;
+}
+.markdown-rendered table { font-size: .95em; }
+.markdown-rendered th { font-family: var(--rw-display); font-weight: 500; letter-spacing: .06em; font-size: .85em; }
+.markdown-rendered small { color: var(--text-muted); }
+
+/* Paintings and portraits: a thin frame and a soft shadow, so they hang like plates in a book. */
+.markdown-rendered img:not(.callout-icon img) {
+  border: 1px solid var(--rw-edge);
+  border-radius: 3px;
+  padding: 3px;
+  background: var(--background-secondary);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .25);
+}
+.markdown-rendered table img { padding: 1px; box-shadow: 0 1px 4px rgba(0, 0, 0, .25); border-radius: 50%; }
+
+/* ---------------------------------------------------------------- callouts */
+.callout {
+  --callout-radius: 3px;
+  --callout-padding: 10px 14px;
+  --callout-title-weight: 500;
+  font-size: .97em;
+}
+.callout-title { font-family: var(--rw-display); letter-spacing: .05em; font-size: .92em; }
+
+/* the tale's own voice: the opening of Home, read-aloud passages */
+.callout[data-callout="tale"], .callout[data-callout="quote"] {
+  --callout-color: 184, 145, 58;
+  --callout-icon: lucide-scroll;
+}
+.callout[data-callout="tale"] { background: transparent; border-left: 2px solid rgb(184, 145, 58); }
+.callout[data-callout="tale"] .callout-content { font-style: italic; font-size: 1.05em; }
+
+/* out-of-character notes from the Loremaster */
+.callout[data-callout="loremaster"] {
+  --callout-color: 107, 22, 18;
+  --callout-icon: lucide-feather;
+}
+.theme-dark .callout[data-callout="loremaster"] { --callout-color: 192, 87, 74; }
+.callout[data-callout="loremaster"] .callout-content { font-size: .93em; }
+
+/* oracles: the Telling and the Lore tables */
+.callout[data-callout="oracle"], .callout[data-callout="question"] {
+  --callout-color: 91, 74, 54;
+  --callout-icon: lucide-sparkles;
+}
+.theme-dark .callout[data-callout="oracle"], .theme-dark .callout[data-callout="question"] { --callout-color: 185, 168, 136; }
+
+/* the player's own words */
+.callout[data-callout="player"] {
+  --callout-color: 77, 94, 54;
+  --callout-icon: lucide-user-round;
+}
+.theme-dark .callout[data-callout="player"] { --callout-color: 141, 165, 104; }
+.callout[data-callout="player"] .callout-content { font-style: italic; }
+
+/* rolls */
+.callout[data-callout="success"] { --callout-color: 77, 94, 54; --callout-icon: lucide-dice-5; }
+.callout[data-callout="failure"] { --callout-color: 142, 31, 26; --callout-icon: lucide-dice-1; }
+.theme-dark .callout[data-callout="success"] { --callout-color: 141, 165, 104; }
+.theme-dark .callout[data-callout="failure"] { --callout-color: 192, 87, 74; }
+
+/* the Eye, Hope and Shadow: revelations, hope kindled, shadow gained */
+.callout[data-callout="eye"] { --callout-color: 196, 80, 30; --callout-icon: lucide-eye; }
+.callout[data-callout="hope"] { --callout-color: 184, 145, 58; --callout-icon: lucide-sun; }
+.callout[data-callout="shadow"] { --callout-color: 60, 52, 44; --callout-icon: lucide-moon; }
+.theme-dark .callout[data-callout="shadow"] { --callout-color: 150, 138, 120; }
+
+/* A journey's end (written by the chronicle), and a cutaway: a scene elsewhere that the hero doesn't see. */
+.callout[data-callout="journey"] { --callout-color: 77, 94, 54; --callout-icon: lucide-footprints; }
+.theme-dark .callout[data-callout="journey"] { --callout-color: 141, 165, 104; }
+.callout[data-callout="cutaway"] { --callout-color: 90, 80, 110; --callout-icon: lucide-clapperboard; }
+.callout[data-callout="cutaway"] .callout-content { font-style: italic; }
+.theme-dark .callout[data-callout="cutaway"] { --callout-color: 160, 150, 185; }

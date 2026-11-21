@@ -1,0 +1,12 @@
+#!/bin/sh
+# Ringwraith guard: blocks commits of copyrighted/derived material.
+# Enabled by: git config core.hooksPath .githooks
+repo="$(git rev-parse --show-toplevel)"
+if [ -x "$repo/.venv/Scripts/python.exe" ]; then
+  py="$repo/.venv/Scripts/python.exe"
+elif [ -x "$repo/.venv/bin/python" ]; then
+  py="$repo/.venv/bin/python"
+else
+  py="python"
+fi
+PYTHONPATH="$repo/tools" exec "$py" -m ringwraith.guard

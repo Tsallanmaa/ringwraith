@@ -1,0 +1,16 @@
+# Copy to ringwraith.toml (gitignored) and adjust for this machine.
+# Relative paths are resolved against the repository root.
+
+[paths]
+references = "References"                       # your purchased PDFs (never committed)
+build = "build"                                 # raw extraction output (never committed)
+lore = "lore"                                   # distilled knowledge base (never committed)
+vaults = "C:/Users/you/Documents/Ringwraith"  # one Obsidian vault per campaign, in this folder
+
+[lemonade]
+url = "http://127.0.0.1:13305"
+
+# Your PDFs are recognised by the words in their file names (run `ringwraith doctor` to see which were).
+# If one isn't, name it here by its source id (the ids are listed by `ringwraith doctor`):
+# [sources]
+# core = "My rulebook.pdf"

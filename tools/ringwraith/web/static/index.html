@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ringwraith Table</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="style.css">
+<!-- Served from the table itself, so it works offline (see vendor/README.md). Fonts fall back if offline. -->
+<script src="vendor/leaflet/leaflet.js"></script>
+<script src="vendor/marked.min.js"></script>
+<script src="vendor/purify.min.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="ring" aria-hidden="true"></span>Ringwraith</div>
+  <div class="campaign" id="campaign"></div>
+  <span class="conn" id="conn" data-state="connecting" role="status" aria-live="polite">Connecting…</span>
+  <div class="actions">
+    <button id="btn-begin" class="ghost" title="Ringwraith loads the campaign state and recaps">Begin session</button>
+    <button id="btn-end" class="ghost" title="Ringwraith writes up the session: the tale, people, places, rolls, experience">End session</button>
+    <button id="btn-stop" class="ghost" title="Interrupt what Ringwraith is writing right now (the session goes on)">Interrupt</button>
+    <button id="btn-new" class="ghost" title="Forget the conversation (the vault stays) and start fresh">New conversation</button>
+    <a id="lnk-vault" class="ghost btn" target="_blank" rel="noopener" title="Open the campaign vault in Obsidian">Obsidian</a>
+  </div>
+</header>
+
+<main class="table">
+  <section class="play">
+    <div class="stage" id="stage">
+      <img id="stage-img-a" class="stage-img show" alt="">
+      <img id="stage-img-b" class="stage-img" alt="">
+      <div class="stage-veil"></div>
+      <div class="stage-title" id="stage-title"></div>
+      <div class="stage-painting" id="stage-painting">the scene is being painted…</div>
+      <div class="mapview" id="mapview">
+        <div id="leaflet"></div>
+        <div class="map-pick" id="map-pick"></div>
+        <div class="map-toggles">
+          <button type="button" id="map-hex" title="Show the hex grid (20 miles a hex)">Hexes</button>
+          <button type="button" id="map-fog" title="Fog over lands not yet seen">Fog</button>
+        </div>
+        <div class="map-time">
+          <button type="button" id="map-play" title="Play the travels day by day">▶</button>
+          <input type="range" id="map-slider" min="0" max="0" value="0">
+          <span id="map-day">Day</span>
+          <button type="button" id="map-now" class="linkish" title="Back to today">now</button>
+        </div>
+      </div>
+      <div class="stage-tabs" id="stage-tabs">
+        <button type="button" data-view="scene" class="on">Scene</button><button type="button" data-view="map">Map</button>
+      </div>
+      <button type="button" class="stage-repaint" id="stage-repaint" title="Ask Ringwraith to set the scene for where you are now">↻</button>
+    </div>
+
+    <div class="page">
+      <section class="fightpanel" id="fight" hidden></section>
+      <section class="journeypanel" id="journey" hidden></section>
+      <div class="log" id="log" aria-live="polite"></div>
+      <div class="activity" id="activity"><span class="quill"></span><span id="activity-text">Ringwraith is writing…</span></div>
+      <button type="button" class="dock-handle" id="dock-handle"></button>
+      <div class="dock" id="dock"></div>
+      <form class="composer" id="composer">
+        <textarea id="input" rows="2" aria-label="Your words to Ringwraith" placeholder="What do you do? (Enter to send, Shift+Enter for a new line)"></textarea>
+        <button type="submit" class="send">Send</button>
+      </form>
+    </div>
+  </section>
+
+  <aside class="side" id="side">
+    <section class="panel" id="panel-hero"></section>
+    <section class="panel" id="panel-world"></section>
+    <section class="panel" id="panel-band"></section>
+  </aside>
+</main>
+
+<!-- The Tale and the roll log slide in from the left when wanted; small tabs on the edge otherwise. -->
+<nav class="drawer-tabs" id="drawer-tabs" aria-label="Drawers">
+  <button type="button" class="dtab" data-drawer="tale" id="dtab-tale" title="Mission, journey, threads and Compass"><span>The Tale</span><em></em></button>
+  <button type="button" class="dtab" data-drawer="rolls" id="dtab-rolls" title="Every roll and oracle so far"><span>Rolls</span><em></em></button>
+</nav>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <button type="button" class="drawer-close" id="drawer-close" title="Close (Esc)">×</button>
+  <section class="panel" id="panel-tale"></section>
+  <section class="panel" id="panel-rolls"></section>
+</aside>
+<script src="map.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
